@@ -50,15 +50,23 @@ class handler(BaseHTTPRequestHandler):
             for f in info.get("formats", []):
                 if not f.get("url"):
                     continue
-                if f.get("vcodec") == "none":   # audio-only stream
+                vcodec = f.get("vcodec") or ""
+                acodec = f.get("acodec") or ""
+                h = f.get("height") or 0
+
+                if vcodec == "none" or (not h and acodec != "none"):
+                    # audio-only stream
                     if "audio" not in seen:
                         formats.append({"label": "Audio MP3", "url": f["url"], "audio": True})
                         seen.add("audio")
-                elif f.get("height"):
-                    h = f["height"]
-                    if h in (1080, 720, 480) and h not in seen:
-                        formats.append({"label": f"{h}p" + (" HD" if h >= 1080 else ""),
-                                        "url": f["url"], "audio": False})
+                elif h and vcodec != "none":
+                    # video stream (with or without audio muxed in)
+                    if h not in seen:
+                        if h >= 1080:
+                            label = f"{h}p HD"
+                        else:
+                            label = f"{h}p"
+                        formats.append({"label": label, "url": f["url"], "audio": False})
                         seen.add(h)
 
             formats.sort(key=lambda x: (x["audio"], -int("".join(c for c in x["label"] if c.isdigit()) or 0)))
