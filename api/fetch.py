@@ -48,18 +48,12 @@ class handler(BaseHTTPRequestHandler):
             all_formats = info.get("formats", [])
 
             # Categorize streams:
-            # We want MUXED streams (has both video and audio in the same file).
-            # In yt-dlp:
-            # - vcodec == 'none': audio-only stream
-            # - acodec == 'none': video-only stream (NO SOUND!)
-            # - If acodec != 'none' and vcodec != 'none': MUXED (HAS SOUND!)
-            # Note: For Instagram progressive videos (video_versions), yt-dlp sets
-            # acodec to None when audio is present. Therefore, acodec != 'none' correctly
-            # identifies streams that have audio!
-
+            # - MUXED: has both video and audio in the same file.
+            # - VIDEO_ONLY: video stream with no audio track.
+            # - AUDIO_ONLY: true audio stream (vcodec == 'none').
             muxed_streams = {}       # res -> format with audio+video
             video_only_streams = {}  # res -> format with video only (fallback)
-            audio_streams = []       # audio-only formats
+            audio_streams = []       # true audio-only formats
 
             for f in all_formats:
                 url_f = f.get("url")
@@ -79,7 +73,7 @@ class handler(BaseHTTPRequestHandler):
                 res = min(h, w) if (h and w) else (h or w)
 
                 # Has video track?
-                has_video = vcodec != "none" and res > 0
+                has_video = (vcodec != "none" and vcodec != "") or res > 0
 
                 # Has audio track?
                 if acodec == "none":
@@ -87,28 +81,23 @@ class handler(BaseHTTPRequestHandler):
                 elif is_dash:
                     has_audio = bool(acodec and acodec != "none")
                 else:
-                    # Non-DASH progressive streams (Instagram, TikTok, Facebook, etc.):
-                    # acodec is either codec name or None (when has_audio is True).
-                    # Both mean audio is present!
+                    # Non-DASH progressive streams (Instagram, TikTok, Facebook, etc.)
                     has_audio = True
 
-                # Categorize
+                # Categorize strictly
                 if vcodec == "none" or (not has_video and has_audio):
                     audio_streams.append(f)
-                elif has_video and has_audio:
-                    # Muxed format (audio + video)
+                elif has_video and has_audio and res > 0:
                     prev = muxed_streams.get(res)
                     if prev is None:
                         muxed_streams[res] = f
                     else:
-                        # Prefer non-dash progressive formats over dash formats
                         prev_is_dash = "dash" in str(prev.get("format_id") or "").lower()
                         if prev_is_dash and not is_dash:
                             muxed_streams[res] = f
                         elif not (is_dash and not prev_is_dash) and tbr > (prev.get("tbr") or 0):
                             muxed_streams[res] = f
-                elif has_video and not has_audio:
-                    # Video-only (no sound) - only used as absolute last resort
+                elif has_video and not has_audio and res > 0:
                     prev = video_only_streams.get(res)
                     if prev is None or tbr > (prev.get("tbr") or 0):
                         video_only_streams[res] = f
@@ -171,13 +160,22 @@ class handler(BaseHTTPRequestHandler):
                     seen_labels.add(label)
 
             # 4. Add Audio MP3 option
+            # If a dedicated audio stream exists, use it. Otherwise, use the smallest
+            # muxed video stream so the browser can extract the audio track without downloading heavy video.
             if best_audio:
                 formats.append({
                     "label": "Audio MP3",
                     "url": best_audio["url"],
                     "audio": True,
                 })
-            elif info.get("url") and (info.get("vcodec") == "none" or not formats):
+            elif muxed_streams:
+                smallest_res = min(muxed_streams)
+                formats.append({
+                    "label": "Audio MP3",
+                    "url": muxed_streams[smallest_res]["url"],
+                    "audio": True,
+                })
+            elif info.get("url"):
                 formats.append({
                     "label": "Audio MP3",
                     "url": info["url"],
