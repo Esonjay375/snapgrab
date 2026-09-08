@@ -2,7 +2,6 @@ from http.server import BaseHTTPRequestHandler
 import json, os, urllib.parse
 import yt_dlp
 
-# Optional anti-abuse: set ALLOWED_ORIGIN env var in Vercel → e.g. https://yourapp.vercel.app
 ALLOWED = os.environ.get("ALLOWED_ORIGIN", "")
 
 class handler(BaseHTTPRequestHandler):
@@ -35,42 +34,62 @@ class handler(BaseHTTPRequestHandler):
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
-                "skip_download": True,     # extract only - no video bytes pass through Vercel
+                "skip_download": True,
                 "noplaylist": True,
                 "socket_timeout": 25,
-                "format": "bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best",
             }
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
+                if isinstance(info, dict) and info.get("entries"):
+                    info = info["entries"][0]
 
-            if isinstance(info, dict) and info.get("entries"):
-                info = info["entries"][0]
+                formats, seen = [], set()
 
-            formats, seen = [], set()
-            for f in info.get("formats", []):
-                if not f.get("url"):
-                    continue
-                if f.get("vcodec") == "none":   # audio-only stream
-                    if "audio" not in seen:
-                        formats.append({"label": "Audio MP3", "url": f["url"], "audio": True})
-                        seen.add("audio")
-                elif f.get("height"):
-                    h = f["height"]
-                    if h in (1080, 720, 480) and h not in seen:
-                        formats.append({"label": f"{h}p" + (" HD" if h >= 1080 else ""),
-                                        "url": f["url"], "audio": False})
-                        seen.add(h)
+                for f in info.get("formats", []):
+                    if not f.get("url"):
+                        continue
 
-            formats.sort(key=lambda x: (x["audio"], -int("".join(c for c in x["label"] if c.isdigit()) or 0)))
-            if not formats:
-                return self._send(404, {"error": "no downloadable formats found"})
+                    # Capture Audio
+                    if f.get("vcodec") == "none" and f.get("acodec") != "none":
+                        if "audio" not in seen:
+                            formats.append({"label": "Audio MP3", "url": f["url"], "audio": True})
+                            seen.add("audio")
 
-            dur = int(info.get("duration") or 0)
-            self._send(200, {
-                "title": info.get("title") or "Video",
-                "duration": f"{dur // 60}:{dur % 60:02d}",
-                "thumbnail": info.get("thumbnail") or "",
-                "formats": formats,
-            })
+                    # Capture Video (Progressive or Combined Formats)
+                    elif f.get("height") and f.get("vcodec") != "none":
+                        h = f["height"]
+                        # Filter to standard resolutions or any valid video height
+                        if h not in seen:
+                            # Prefer formats that contain both video and audio if direct links are used
+                            has_audio = f.get("acodec") != "none"
+                            label = f"{h}p" + (" HD" if h >= 720 else "")
+                            if not has_audio:
+                                label += " (No Audio)"
+
+                            formats.append({
+                                "label": label,
+                                "url": f["url"],
+                                "audio": False
+                            })
+                            seen.add(h)
+
+                # Sort: Video first (highest resolution down), then Audio
+                formats.sort(key=lambda x: (
+                    x["audio"], 
+                    -int("".join(c for c in x["label"] if c.isdigit()) or 0)
+                ))
+
+                if not formats:
+                    return self._send(404, {"error": "no downloadable formats found"})
+
+                dur = int(info.get("duration") or 0)
+                self._send(200, {
+                    "title": info.get("title") or "Video",
+                    "duration": f"{dur // 60}:{dur % 60:02d}",
+                    "thumbnail": info.get("thumbnail") or "",
+                    "formats": formats,
+                })
+
         except Exception as e:
             self._send(500, {"error": str(e)[:200]})
