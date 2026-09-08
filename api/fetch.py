@@ -46,7 +46,9 @@ class handler(BaseHTTPRequestHandler):
             if isinstance(info, dict) and info.get("entries"):
                 info = info["entries"][0]
 
-            formats, seen = [], set()
+            # Pass 1: collect MUXED streams (video + audio together) — these have sound
+            muxed, seen_mux = [], set()
+            audio_fmt = None
             for f in info.get("formats", []):
                 if not f.get("url"):
                     continue
@@ -54,20 +56,34 @@ class handler(BaseHTTPRequestHandler):
                 acodec = f.get("acodec") or ""
                 h = f.get("height") or 0
 
-                if vcodec == "none" or (not h and acodec != "none"):
-                    # audio-only stream
-                    if "audio" not in seen:
-                        formats.append({"label": "Audio MP3", "url": f["url"], "audio": True})
-                        seen.add("audio")
-                elif h and vcodec != "none":
-                    # video stream (with or without audio muxed in)
-                    if h not in seen:
-                        if h >= 1080:
-                            label = f"{h}p HD"
-                        else:
-                            label = f"{h}p"
+                is_audio_only = vcodec in ("none", "") and acodec not in ("none", "")
+                is_muxed = h > 0 and vcodec not in ("none", "") and acodec not in ("none", "")
+
+                if is_audio_only and audio_fmt is None:
+                    audio_fmt = f  # keep best audio-only for MP3 option
+                elif is_muxed and h not in seen_mux:
+                    label = f"{h}p HD" if h >= 1080 else f"{h}p"
+                    muxed.append({"label": label, "url": f["url"], "audio": False})
+                    seen_mux.add(h)
+
+            formats = muxed[:]
+
+            # Pass 2: if NO muxed streams found, fall back to any video stream (better than nothing)
+            if not formats:
+                seen_fb = set()
+                for f in info.get("formats", []):
+                    if not f.get("url"):
+                        continue
+                    vcodec = f.get("vcodec") or ""
+                    h = f.get("height") or 0
+                    if h > 0 and vcodec not in ("none", "") and h not in seen_fb:
+                        label = f"{h}p HD" if h >= 1080 else f"{h}p"
                         formats.append({"label": label, "url": f["url"], "audio": False})
-                        seen.add(h)
+                        seen_fb.add(h)
+
+            # Add audio-only MP3 option at the end
+            if audio_fmt:
+                formats.append({"label": "Audio MP3", "url": audio_fmt["url"], "audio": True})
 
             formats.sort(key=lambda x: (x["audio"], -int("".join(c for c in x["label"] if c.isdigit()) or 0)))
             if not formats:
