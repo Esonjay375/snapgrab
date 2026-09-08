@@ -35,10 +35,10 @@ class handler(BaseHTTPRequestHandler):
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
-                "skip_download": True,     # extract only - no video bytes pass through Vercel
+                "skip_download": True,
                 "noplaylist": True,
                 "socket_timeout": 25,
-                "format": "bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best",
+                "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
             }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -46,46 +46,134 @@ class handler(BaseHTTPRequestHandler):
             if isinstance(info, dict) and info.get("entries"):
                 info = info["entries"][0]
 
-            # Pass 1: collect MUXED streams (video + audio together) — these have sound
-            muxed, seen_mux = [], set()
-            audio_fmt = None
-            for f in info.get("formats", []):
+            all_formats = info.get("formats", [])
+
+            # Separate video-only, audio-only and muxed streams
+            video_streams = {}   # height -> best format
+            audio_streams = []   # all audio-only streams sorted by quality
+            muxed_streams = {}   # height -> muxed format
+
+            for f in all_formats:
                 if not f.get("url"):
                     continue
-                vcodec = f.get("vcodec") or ""
-                acodec = f.get("acodec") or ""
-                h = f.get("height") or 0
+                vcodec = (f.get("vcodec") or "").lower()
+                acodec = (f.get("acodec") or "").lower()
+                h      = f.get("height") or 0
+                w      = f.get("width")  or 0
+                tbr    = f.get("tbr") or 0
 
-                is_audio_only = vcodec in ("none", "") and acodec not in ("none", "")
-                is_muxed = h > 0 and vcodec not in ("none", "") and acodec not in ("none", "")
+                # Use SHORT side as resolution — this handles portrait videos correctly.
+                # e.g. Instagram Reel 1080×1920 → res=1080 → "1080p HD" (not "1920p HD")
+                res = min(h, w) if (h and w) else (h or w)
 
-                if is_audio_only and audio_fmt is None:
-                    audio_fmt = f  # keep best audio-only for MP3 option
-                elif is_muxed and h not in seen_mux:
-                    label = f"{h}p HD" if h >= 1080 else f"{h}p"
-                    muxed.append({"label": label, "url": f["url"], "audio": False})
-                    seen_mux.add(h)
+                v_present = vcodec and vcodec != "none"
+                a_present = acodec and acodec != "none"
 
-            formats = muxed[:]
+                if v_present and a_present and res:
+                    # Muxed stream — prefer highest tbr per resolution
+                    prev = muxed_streams.get(res)
+                    if prev is None or tbr > (prev.get("tbr") or 0):
+                        muxed_streams[res] = f
+                elif v_present and not a_present and res:
+                    # Video-only DASH stream — prefer highest tbr per resolution
+                    prev = video_streams.get(res)
+                    if prev is None or tbr > (prev.get("tbr") or 0):
+                        video_streams[res] = f
+                elif a_present and not v_present:
+                    # Audio-only stream
+                    audio_streams.append(f)
 
-            # Pass 2: if NO muxed streams found, fall back to any video stream (better than nothing)
-            if not formats:
-                seen_fb = set()
-                for f in info.get("formats", []):
-                    if not f.get("url"):
-                        continue
-                    vcodec = f.get("vcodec") or ""
-                    h = f.get("height") or 0
-                    if h > 0 and vcodec not in ("none", "") and h not in seen_fb:
-                        label = f"{h}p HD" if h >= 1080 else f"{h}p"
-                        formats.append({"label": label, "url": f["url"], "audio": False})
-                        seen_fb.add(h)
+            # Sort audio streams by quality descending, pick best
+            audio_streams.sort(key=lambda f: f.get("abr") or f.get("tbr") or 0, reverse=True)
+            best_audio = audio_streams[0] if audio_streams else None
 
-            # Add audio-only MP3 option at the end
-            if audio_fmt:
-                formats.append({"label": "Audio MP3", "url": audio_fmt["url"], "audio": True})
+            def res_label(res):
+                """Convert short-side pixel count to standard quality label."""
+                if res >= 1080: return f"{res}p HD" if res == 1080 else "1080p HD"
+                if res >= 720:  return "720p"
+                if res >= 480:  return "480p"
+                if res >= 360:  return "360p"
+                return f"{res}p"
 
-            formats.sort(key=lambda x: (x["audio"], -int("".join(c for c in x["label"] if c.isdigit()) or 0)))
+            # Build output formats list
+            # Priority: muxed > video+audio_url pair > nothing
+            formats = []
+            seen_res = set()
+
+            # Add muxed streams first (have audio built-in, no merging needed)
+            for res in sorted(muxed_streams, reverse=True):
+                label = res_label(res)
+                if label in seen_res:
+                    continue  # skip duplicate quality tiers
+                f = muxed_streams[res]
+                formats.append({
+                    "label": label,
+                    "url": f["url"],
+                    "audio_url": None,
+                    "audio": False,
+                })
+                seen_res.add(label)
+
+            # Add video-only streams paired with best audio URL so frontend can merge
+            if best_audio:
+                for res in sorted(video_streams, reverse=True):
+                    label = res_label(res)
+                    if label in seen_res:
+                        continue  # already have this quality tier
+                    f = video_streams[res]
+                    formats.append({
+                        "label": label,
+                        "url": f["url"],
+                        "audio_url": best_audio["url"],
+                        "audio": False,
+                    })
+                    seen_res.add(label)
+
+
+            # Also check top-level url (yt-dlp's chosen best single stream)
+            # and requested_formats (what yt-dlp would merge for best quality)
+            top_url = info.get("url")
+            req_fmts = info.get("requested_formats", [])
+
+            # If yt-dlp selected a single muxed stream, use it as fallback
+            if top_url and not req_fmts and not any(not f["audio"] for f in formats):
+                h = info.get("height") or 0
+                w = info.get("width") or 0
+                res = min(h, w) if (h and w) else (h or w)
+                label = res_label(res) if res else "Best"
+                formats.insert(0, {
+                    "label": label,
+                    "url": top_url,
+                    "audio_url": None,
+                    "audio": False,
+                })
+
+            # If yt-dlp requested separate video+audio for best quality, expose those
+            if len(req_fmts) == 2:
+                v_rf = next((f for f in req_fmts if (f.get("vcodec") or "") not in ("none","")), None)
+                a_rf = next((f for f in req_fmts if (f.get("vcodec") or "") in ("none","")), None)
+                if v_rf and a_rf:
+                    h = v_rf.get("height") or 0
+                    w = v_rf.get("width") or 0
+                    res = min(h, w) if (h and w) else (h or w)
+                    label = res_label(res) if res else "Best"
+                    if not any(f["label"] == label for f in formats):
+                        formats.insert(0, {
+                            "label": label,
+                            "url": v_rf["url"],
+                            "audio_url": a_rf["url"],
+                            "audio": False,
+                        })
+
+            # Audio MP3 option always at the end
+            if best_audio:
+                formats.append({
+                    "label": "Audio MP3",
+                    "url": best_audio["url"],
+                    "audio_url": None,
+                    "audio": True,
+                })
+
             if not formats:
                 return self._send(404, {"error": "no downloadable formats found"})
 
