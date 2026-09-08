@@ -5,6 +5,42 @@ import yt_dlp
 # Optional anti-abuse: set ALLOWED_ORIGIN env var in Vercel → e.g. https://yourapp.vercel.app
 ALLOWED = os.environ.get("ALLOWED_ORIGIN", "")
 
+def fetch_tiktok(url):
+    try:
+        api_url = f"https://www.tikwm.com/api/?url={urllib.parse.quote(url)}"
+        req = urllib.request.Request(api_url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            if data.get("code") == 0 and data.get("data"):
+                d = data["data"]
+                formats = []
+                hd_url = d.get("hdplay")
+                play_url = d.get("play")
+                wm_url = d.get("wmplay")
+                music_url = d.get("music")
+                if hd_url:
+                    formats.append({"label": "1080p HD", "url": hd_url, "audio": False})
+                if play_url:
+                    formats.append({"label": "720p", "url": play_url, "audio": False})
+                elif wm_url:
+                    formats.append({"label": "720p", "url": wm_url, "audio": False})
+                if music_url:
+                    formats.append({"label": "Audio MP3", "url": music_url, "audio": True})
+                if formats:
+                    dur = int(d.get("duration") or 0)
+                    return {
+                        "title": d.get("title") or "TikTok Video",
+                        "duration": f"{dur // 60}:{dur % 60:02d}",
+                        "thumbnail": d.get("cover") or d.get("origin_cover") or "",
+                        "formats": formats,
+                    }
+    except Exception:
+        pass
+    return None
+
 class handler(BaseHTTPRequestHandler):
     def _send(self, code, obj):
         body = json.dumps(obj).encode()
@@ -31,6 +67,12 @@ class handler(BaseHTTPRequestHandler):
             url = (qs.get("url") or [""])[0].strip()
             if not url:
                 return self._send(400, {"error": "missing url"})
+
+            # Direct TikTok handler: avoids IP-bound CDN tokens & extracts clean unwatermarked video
+            if any(k in url.lower() for k in ["tiktok.com", "douyin.com"]):
+                tt_data = fetch_tiktok(url)
+                if tt_data:
+                    return self._send(200, tt_data)
 
             ydl_opts = {
                 "quiet": True,

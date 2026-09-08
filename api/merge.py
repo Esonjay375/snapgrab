@@ -15,7 +15,10 @@ class handler(BaseHTTPRequestHandler):
         self._cors()
         self.end_headers()
 
-    def do_GET(self):
+    def do_HEAD(self):
+        self.do_GET(head_only=True)
+
+    def do_GET(self, head_only=False):
         target = ""
         try:
             if ALLOWED:
@@ -36,6 +39,9 @@ class handler(BaseHTTPRequestHandler):
                 "Accept-Language": "en-US,en;q=0.9",
                 "Sec-Fetch-Mode": "navigate",
             }
+
+            if any(d in target.lower() for d in ["tiktok", "byteimg", "musical.ly", "douyin"]):
+                headers["Referer"] = "https://www.tiktok.com/"
 
             req = urllib.request.Request(target, headers=headers)
 
@@ -60,6 +66,9 @@ class handler(BaseHTTPRequestHandler):
                     self.send_header("Content-Disposition", f'attachment; filename="{safe_filename}"')
 
                 self.end_headers()
+
+                if head_only:
+                    return
 
                 # Stream in 64 KB chunks
                 while True:
