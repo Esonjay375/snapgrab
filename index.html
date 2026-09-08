@@ -148,7 +148,6 @@ footer a:hover{color:var(--text)}
 .toast{position:fixed;left:50%;bottom:86px;transform:translateX(-50%) translateY(20px);background:var(--card2);border:1px solid var(--border);color:var(--text);padding:12px 20px;border-radius:12px;font-size:.85rem;font-weight:600;opacity:0;pointer-events:none;transition:.3s;z-index:100;max-width:90vw;text-align:center}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 </style>
-<base target="_blank">
 </head>
 <body>
 
@@ -218,6 +217,7 @@ footer a:hover{color:var(--text)}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 19h16"/></svg>
             Save Video
           </button>
+          <a id="directLink" href="#" target="_blank" rel="noopener noreferrer" style="display:block;margin-top:10px;text-align:center;font-size:13px;color:var(--muted);text-decoration:underline;">Direct Link (play in browser)</a>
           <div class="res-note" id="resNote">Downloads directly to your device.</div>
         </div>
       </div>
@@ -394,6 +394,19 @@ function showDemo(url, pKey){
     thumb: null, realFormats: null
   });
 }
+function updateSaveBtn(label, realFormats) {
+  const isAudio = label && label.includes("Audio");
+  $("saveBtn").innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 19h16"/></svg> ${isAudio ? "Save Audio (MP3)" : "Save Video"}`;
+  
+  if (realFormats && realFormats.length) {
+    const f = realFormats.find(x => x.label === label) || realFormats[0];
+    if (f && f.url && $("directLink")) {
+      $("directLink").href = f.url;
+      $("directLink").textContent = isAudio ? "Direct audio stream link" : `Direct ${f.label} video link`;
+    }
+  }
+}
+
 function renderResult(pKey, d){
   const p = PLATFORMS[pKey];
   $("thumb").style.background = `linear-gradient(135deg, ${p.color}cc, #131828 85%)`;
@@ -405,32 +418,37 @@ function renderResult(pKey, d){
   qualities.forEach((label,i) => {
     const b = document.createElement("button");
     b.className = "qual" + (i===0 ? " sel" : ""); b.textContent = label;
-    b.onclick = () => { q.querySelectorAll(".qual").forEach(x=>x.classList.remove("sel")); b.classList.add("sel"); };
+    b.onclick = () => {
+      q.querySelectorAll(".qual").forEach(x=>x.classList.remove("sel"));
+      b.classList.add("sel");
+      updateSaveBtn(label, d.realFormats);
+    };
     q.appendChild(b);
   });
+  updateSaveBtn(qualities[0] || "", d.realFormats);
   $("resNote").textContent = d.realFormats ? "Downloads directly to your device. No redirects." : "Demo mode — connect your downloader API in the config to enable real downloads.";
   $("saveBtn").onclick = () => save(d, pKey, d.realFormats);
   $("result").classList.add("show");
   $("result").scrollIntoView({behavior:"smooth", block:"center"});
 }
-async function save(d, pKey, realFormats){
-  if (realFormats) {
-    const sel = $("quals .sel")?.textContent;
-    const f = realFormats.find(x => x.label === sel) || realFormats[0];
-    try {
-      toast("Downloading…");
-      const r = await fetch(f.url); const b = await r.blob();
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(b); a.download = (d.title||"video").replace(/[^\w\- ]/g,"").slice(0,50) + (f.audio ? ".mp3" : ".mp4");
-      a.click(); URL.revokeObjectURL(a.href);
-      toast("Saved ✓");
-    } catch {
-      toast("Opening direct link — if it plays, use your browser's save option");
-      window.open(f.url, "_blank");
-    }
-  } else {
-    toast("Demo mode: add your API endpoint in the script config to enable real downloads.");
+
+function save(d, pKey, realFormats){
+  if (!realFormats || !realFormats.length) {
+    toast("No download options available.");
+    return;
   }
+  const sel = document.querySelector("#quals .sel")?.textContent;
+  const f = realFormats.find(x => x.label === sel) || realFormats[0];
+  const isAudio = Boolean(f.audio);
+  const ext = isAudio ? ".mp3" : ".mp4";
+  const filename = (d.title || "video").replace(/[^\w\- ]/g, "").trim().slice(0, 50) + ext;
+
+  toast(isAudio ? "Starting MP3 download…" : "Starting video download…");
+
+  // Route through proxy with attachment headers so the browser triggers file download.
+  // Called synchronously inside click event so popup blocker NEVER blocks it.
+  const downloadUrl = `/api/merge?url=${encodeURIComponent(f.url)}&filename=${encodeURIComponent(filename)}`;
+  window.open(downloadUrl, "_blank");
 }
 function fail(msg){ errBox.textContent = msg; errBox.classList.add("show"); errBox.scrollIntoView({behavior:"smooth",block:"center"}); }
 
