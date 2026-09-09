@@ -112,12 +112,21 @@ class handler(BaseHTTPRequestHandler):
                 cp = get_cookie_path()
                 has_cookie = os.path.exists(cp) if cp else False
                 size = os.path.getsize(cp) if has_cookie else 0
-                node_path = shutil.which("node")
+                candidates = [
+                    shutil.which("node"),
+                    "/var/lang/bin/node",
+                    "/usr/bin/node",
+                    "/usr/local/bin/node",
+                    "/opt/nodejs/bin/node",
+                    "/var/runtime/node",
+                ]
+                found = [p for p in candidates if p and os.path.exists(p)]
                 return self._send(200, {
                     "has_cookie": has_cookie,
                     "cookie_size": size,
                     "cookie_path": cp,
-                    "node_path": node_path,
+                    "found_node": found,
+                    "env_path": os.environ.get("PATH"),
                 })
             url = (qs.get("url") or [""])[0].strip()
             if not url:
