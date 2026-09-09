@@ -107,6 +107,18 @@ class handler(BaseHTTPRequestHandler):
                     return self._send(403, {"error": "forbidden"})
 
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            if "diag" in qs:
+                import shutil
+                cp = get_cookie_path()
+                has_cookie = os.path.exists(cp) if cp else False
+                size = os.path.getsize(cp) if has_cookie else 0
+                node_path = shutil.which("node")
+                return self._send(200, {
+                    "has_cookie": has_cookie,
+                    "cookie_size": size,
+                    "cookie_path": cp,
+                    "node_path": node_path,
+                })
             url = (qs.get("url") or [""])[0].strip()
             if not url:
                 return self._send(400, {"error": "missing url"})
