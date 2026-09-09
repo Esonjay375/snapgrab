@@ -75,6 +75,7 @@ class handler(BaseHTTPRequestHandler):
                     return self._send(200, tt_data)
 
             is_youtube = any(k in url.lower() for k in ["youtube.com", "youtu.be"])
+            proxy = os.environ.get("HTTP_PROXY") or os.environ.get("PROXY_URL") or os.environ.get("HTTPS_PROXY")
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
@@ -82,6 +83,8 @@ class handler(BaseHTTPRequestHandler):
                 "noplaylist": True,
                 "socket_timeout": 25,
             }
+            if proxy:
+                ydl_opts["proxy"] = proxy
             if is_youtube:
                 cookie_file = "/tmp/yt_cookies.txt"
                 if os.path.exists(cookie_file):
