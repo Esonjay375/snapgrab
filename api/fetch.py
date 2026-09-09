@@ -85,7 +85,7 @@ class handler(BaseHTTPRequestHandler):
             if is_youtube:
                 ydl_opts["extractor_args"] = {
                     "youtube": {
-                        "player_client": ["android", "web"]
+                        "player_client": ["android"]
                     }
                 }
 
