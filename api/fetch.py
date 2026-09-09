@@ -74,6 +74,7 @@ class handler(BaseHTTPRequestHandler):
                 if tt_data:
                     return self._send(200, tt_data)
 
+            is_youtube = any(k in url.lower() for k in ["youtube.com", "youtu.be"])
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
@@ -81,6 +82,13 @@ class handler(BaseHTTPRequestHandler):
                 "noplaylist": True,
                 "socket_timeout": 25,
             }
+            if is_youtube:
+                ydl_opts["extractor_args"] = {
+                    "youtube": {
+                        "player_client": ["android", "web"]
+                    }
+                }
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
 
@@ -102,10 +110,19 @@ class handler(BaseHTTPRequestHandler):
                 if not url_f:
                     continue
 
+                proto = str(f.get("protocol") or "").lower()
+                ext = str(f.get("ext") or "").lower()
+
+                # Skip HLS playlists (m3u8), image manifests, and storyboards
+                if ".m3u8" in url_f or "manifest" in url_f or "m3u8" in proto:
+                    continue
+                if ext in ["mhtml", "jpg", "jpeg", "png", "webp"] or "storyboard" in url_f:
+                    continue
+
                 vcodec = str(f.get("vcodec") or "").lower()
                 acodec = str(f.get("acodec") or "").lower() if f.get("acodec") is not None else None
                 format_id = str(f.get("format_id") or "").lower()
-                is_dash = "dash" in format_id or "dash" in str(f.get("protocol") or "").lower()
+                is_dash = "dash" in format_id or "dash" in proto
 
                 h = f.get("height") or 0
                 w = f.get("width") or 0
@@ -118,16 +135,16 @@ class handler(BaseHTTPRequestHandler):
                 has_video = (vcodec != "none" and vcodec != "") or res > 0
 
                 # Has audio track?
-                if acodec == "none":
+                if acodec == "none" or acodec == "":
                     has_audio = False
                 elif is_dash:
                     has_audio = bool(acodec and acodec != "none")
                 else:
-                    # Non-DASH progressive streams (Instagram, TikTok, Facebook, etc.)
-                    has_audio = True
+                    # Non-DASH progressive streams (Instagram, TikTok, YouTube format 18, Facebook, etc.)
+                    has_audio = bool(acodec and acodec != "none") or (acodec is None and not is_dash)
 
                 # Categorize strictly
-                if vcodec == "none" or (not has_video and has_audio):
+                if (vcodec == "none" or not has_video) and has_audio:
                     audio_streams.append(f)
                 elif has_video and has_audio and res > 0:
                     prev = muxed_streams.get(res)
@@ -187,10 +204,10 @@ class handler(BaseHTTPRequestHandler):
                     })
                     seen_labels.add(label)
 
-            # 3. Only if ZERO muxed streams exist anywhere, fallback to video-only
-            if not formats:
-                for res in sorted(video_only_streams, reverse=True):
-                    label = res_label(res)
+            # 3. If muxed streams exist, but higher resolution video-only streams exist (e.g. YouTube 720p/1080p)
+            for res in sorted(video_only_streams, reverse=True):
+                if res > max(muxed_streams.keys(), default=0):
+                    label = f"{res_label(res)} (No Audio)" if muxed_streams else res_label(res)
                     if label in seen_labels:
                         continue
                     f = video_only_streams[res]

@@ -42,6 +42,8 @@ class handler(BaseHTTPRequestHandler):
 
             if any(d in target.lower() for d in ["tiktok", "byteimg", "musical.ly", "douyin"]):
                 headers["Referer"] = "https://www.tiktok.com/"
+            elif any(d in target.lower() for d in ["youtube", "googlevideo"]):
+                headers["Referer"] = "https://www.youtube.com/"
 
             req = urllib.request.Request(target, headers=headers)
 
