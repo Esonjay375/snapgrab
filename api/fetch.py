@@ -2,22 +2,47 @@ from http.server import BaseHTTPRequestHandler
 import json, os, urllib.parse, urllib.request, http.cookiejar
 import yt_dlp
 
-def ensure_visitor_cookies(cookie_file="/tmp/yt_vis.txt"):
+COOKIES_DATA = """# Netscape HTTP Cookie File
+# https://curl.haxx.se/rfc/cookie_spec.html
+# This is a generated file! Do not edit.
+
+.youtube.com	TRUE	/	TRUE	1802239310	__Secure-YNID	20.YT=Xq-6pXbxz-dyYk0v_9a2ursmHeBHHcMa4uwbWuLgfdSFAAzA0-ZoyuanASeaj7LixSQ2buiQkAOBnW1h1FtYU1ZC7QLsWSvPopTlQis4_F6gQMCaGeUStaFc5PVB8qXByfob95ozKq_CSmKqrCymgYzTS1q6x13IJW47juew_9K-NVOMwJIxO4fhYpDRQZP0ed5RqGjf6z3NkdPAIKuPLc4wuyTy0Hx_TRZz_lFgZ3sufvUJM6Is5VxUAXJrXi6l7izLzF_syPgxRgdZDivjskQyPE9qIPWkVI4H9nT0kx_sIJtFa7lSn4uzyAUfTcQOTK8a874cxWdbM5KUCvPCrQ
+.youtube.com	TRUE	/	TRUE	1802239310	VISITOR_INFO1_LIVE	NqSqVKJEZS0
+.youtube.com	TRUE	/	TRUE	1802239310	VISITOR_PRIVACY_METADATA	CgJBRRIEGgAgNA%3D%3D
+.youtube.com	TRUE	/	TRUE	1823509649	PREF	tz=Asia.Dubai&f4=4000000&f6=40000000&f7=100
+.youtube.com	TRUE	/	FALSE	1823509495	SID	g.a000CgkXn_LdAUKLy9rHnpSz7cA-KGGAoSao9AbFNZZcV1DOktuU-9cLv_GERvdGHLz6wh32EAACgYKAXISARESFQHGX2Mi99reiZJicgAwaAEMh_QJ1hoVAUF8yKrSgHCnXTjbBojIe6eDl5uC0076
+.youtube.com	TRUE	/	TRUE	1823509495	__Secure-1PSID	g.a000CgkXn_LdAUKLy9rHnpSz7cA-KGGAoSao9AbFNZZcV1DOktuUSW_ikFsUFQIQOq-phNbSvAACgYKAeASARESFQHGX2MihA2tPfm_9DH_e3BR09uwLxoVAUF8yKpoiZHGYROeltw_ZPkujPl90076
+.youtube.com	TRUE	/	TRUE	1823509495	__Secure-3PSID	g.a000CgkXn_LdAUKLy9rHnpSz7cA-KGGAoSao9AbFNZZcV1DOktuUMPse3nW1uHsUNI5stHp4QwACgYKAdUSARESFQHGX2MidNtP7ep4Ubo2fOyWrtClnRoVAUF8yKq7AKISO72iYrnUCliVV5Lm0076
+.youtube.com	TRUE	/	FALSE	1823509495	HSID	AD2IK-UvpaW2_PIJR
+.youtube.com	TRUE	/	TRUE	1823509495	SSID	A9EB-XQv5FscOJl2N
+.youtube.com	TRUE	/	FALSE	1823509495	APISID	LlG7ghUSNHBPUDsT/Ao8m6w_-m65caUKD3
+.youtube.com	TRUE	/	TRUE	1823509495	SAPISID	ikIcIDsUSgPyt9wT/AcWxXlAseFOi07ZAC
+.youtube.com	TRUE	/	TRUE	1823509495	__Secure-1PAPISID	ikIcIDsUSgPyt9wT/AcWxXlAseFOi07ZAC
+.youtube.com	TRUE	/	TRUE	1823509495	__Secure-3PAPISID	ikIcIDsUSgPyt9wT/AcWxXlAseFOi07ZAC
+.youtube.com	TRUE	/	TRUE	1823509647	LOGIN_INFO	AFmmF2swRQIgP5MudSJ33atpBO3HBbrNH2aXHt77OyFnhaZrKHtNdVYCIQDXdI_623sn4NFs5YoPJshsKUvI42kOtawWFLzoHWnm5g:QUQ3MjNmd0ZwRy1xSGRQX3pWUlRDVTNlTWpzV2pFMHI1T0JrM05kMEtvd0hUMWhXYWNzTVlfRWFnSWFqQm5md3NSRThkMkU3SjFLOXlZTVRTMHhPNEdJMENrX3dTWlVid0ZvalFDcDFMWjJhbjZfNlVuZ0pZZmx3ZFNjSFpvUTdnckdGNU9tN25hZ3hCOHNad1JCNDQzdEdvRzBJaGF5aGpR
+.youtube.com	TRUE	/	TRUE	1820485652	__Secure-1PSIDTS	sidts-CjUBXMw41SR2qH_5xmygF03rNrEZykAllpmR_3Q1jv5hW2g8dHie1azbRCaH6JCx7sYRMoOE1xAA
+.youtube.com	TRUE	/	TRUE	1820485652	__Secure-3PSIDTS	sidts-CjUBXMw41SR2qH_5xmygF03rNrEZykAllpmR_3Q1jv5hW2g8dHie1azbRCaH6JCx7sYRMoOE1xAA
+.youtube.com	TRUE	/	FALSE	1820485653	SIDCC	AKEyXzWgLgoQahvOl_35dp3L93jgF6APT0Egc7Ld_RFdLfMYW_x1UF7CXypLScVSHed_8mrZSA
+.youtube.com	TRUE	/	TRUE	1820485653	__Secure-1PSIDCC	AKEyXzUvtDHaNJMMbQY7xwLUYugKt7mw-nXNl5MAJ76h80V5JF1b-uLSAG9XpK2ofvEdcfh1
+.youtube.com	TRUE	/	TRUE	1820485653	__Secure-3PSIDCC	AKEyXzUGvXHh78Wfjy05zAPVyHgz48tpvAqzdQUmhNDgJV_plBb33Ndm5eJcRFwggArKnVjXdg
+.youtube.com	TRUE	/	TRUE	1804501653	VISITOR_INFO1_LIVE	NqSqVKJEZS0
+.youtube.com	TRUE	/	TRUE	1804501653	VISITOR_PRIVACY_METADATA	CgJBRRIEGgAgNA%3D%3D
+.youtube.com	TRUE	/	TRUE	0	YSC	h4OWAqPg32w
+.youtube.com	TRUE	/	TRUE	1804501647	__Secure-ROLLOUT_TOKEN	CNrsqrzDwIqFDxC--IuunMmWAxijpJ_ipOGWAw%3D%3D
+.youtube.com	TRUE	/	TRUE	1804501647	__Secure-YNID	21.YT=Q0fyAdbiOWNlYF77SL9Sd2-6XgTBCuoovQ7gZX7iNzqWn0nJeL78dmhlQA_RyI_cHfQh-I8X4ai33eoqRt7A_64lJrGClGwwCuabSdxPHP3hdq9aa6Wlg_MygxFW-QzcaOYyMVsLqXoGYyk1iaH523G8a8VDK2z-4A8ZMsDFKtK4GVNh4zTXtdTOmRPpgNwVEa3Wu_Kk-1VeFMv4eYT5y2_bBglhue8-OSETPWr9DOIpXa8Er-n00mmWV6lGjrX4eBVm8uz0d49lGmikm46in5mWjhcgqFQNjDWy_HU2L-7w8FSpDALPoKL9QDID5I1xDNW8i92NmJP4vLEwur_lxg
+"""
+
+def get_cookie_path(path="/tmp/yt_cookies.txt"):
     try:
-        if os.path.exists(cookie_file) and os.path.getsize(cookie_file) > 50:
-            return cookie_file
-        cj = http.cookiejar.MozillaCookieJar(cookie_file)
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-        req = urllib.request.Request("https://www.youtube.com/", headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-        })
-        with opener.open(req, timeout=10) as resp:
-            cj.save(ignore_discard=True, ignore_expires=True)
-            return cookie_file
+        custom = os.environ.get("YOUTUBE_COOKIES") or COOKIES_DATA
+        if custom:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(custom.strip() + "\n")
+            return path
     except Exception:
         pass
+    if os.path.exists("cookies.txt"):
+        return os.path.abspath("cookies.txt")
     return None
 
 # Optional anti-abuse: set ALLOWED_ORIGIN env var in Vercel → e.g. https://yourapp.vercel.app
@@ -104,31 +129,20 @@ class handler(BaseHTTPRequestHandler):
             if proxy:
                 ydl_opts["proxy"] = proxy
             if is_youtube:
-                cookie_file = "/tmp/yt_cookies.txt"
-                if os.path.exists(cookie_file):
-                    ydl_opts["cookiefile"] = cookie_file
-                elif os.environ.get("YOUTUBE_COOKIES"):
-                    try:
-                        with open(cookie_file, "w") as cf:
-                            cf.write(os.environ["YOUTUBE_COOKIES"])
-                        ydl_opts["cookiefile"] = cookie_file
-                    except Exception:
-                        pass
-                else:
-                    vis = ensure_visitor_cookies()
-                    if vis:
-                        ydl_opts["cookiefile"] = vis
+                cp = get_cookie_path()
+                if cp:
+                    ydl_opts["cookiefile"] = cp
+                ydl_opts["js_runtimes"] = {"node": {}}
+                ydl_opts["remote_components"] = ["ejs:github"]
 
                 info = None
-                # Attempt 1: Android client (provides progressive format 18/22 with audio)
                 try:
-                    ydl_opts["extractor_args"] = {"youtube": {"player_client": ["android"]}}
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         info = ydl.extract_info(url, download=False)
                     if not info or not info.get("formats"):
-                        raise Exception("No formats from android client")
+                        raise Exception("No formats returned")
                 except Exception:
-                    # Attempt 2: VisionOS client (bypasses YouTube datacenter bot-block on AWS/Vercel)
+                    # Fallback: visionos client
                     ydl_opts["extractor_args"] = {"youtube": {"player_client": ["visionos"]}}
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         info = ydl.extract_info(url, download=False)
