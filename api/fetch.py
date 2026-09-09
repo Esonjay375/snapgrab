@@ -83,14 +83,33 @@ class handler(BaseHTTPRequestHandler):
                 "socket_timeout": 25,
             }
             if is_youtube:
-                ydl_opts["extractor_args"] = {
-                    "youtube": {
-                        "player_client": ["android"]
-                    }
-                }
+                cookie_file = "/tmp/yt_cookies.txt"
+                if os.path.exists(cookie_file):
+                    ydl_opts["cookiefile"] = cookie_file
+                elif os.environ.get("YOUTUBE_COOKIES"):
+                    try:
+                        with open(cookie_file, "w") as cf:
+                            cf.write(os.environ["YOUTUBE_COOKIES"])
+                        ydl_opts["cookiefile"] = cookie_file
+                    except Exception:
+                        pass
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+                info = None
+                # Attempt 1: Android client (provides progressive format 18/22 with audio)
+                try:
+                    ydl_opts["extractor_args"] = {"youtube": {"player_client": ["android"]}}
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=False)
+                    if not info or not info.get("formats"):
+                        raise Exception("No formats from android client")
+                except Exception:
+                    # Attempt 2: VisionOS client (bypasses YouTube datacenter bot-block on AWS/Vercel)
+                    ydl_opts["extractor_args"] = {"youtube": {"player_client": ["visionos"]}}
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=False)
+            else:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
 
             if isinstance(info, dict) and info.get("entries"):
                 info = info["entries"][0]

@@ -376,7 +376,10 @@ $("goBtn").onclick = async () => {
   try {
     if (DOWNLOADER_API) await fetchFromApi(url, pKey);
     else showDemo(url, pKey);
-  } catch(e){ fail("Could not fetch this video. It may be private, deleted, or the platform is temporarily blocking requests. Try again in a moment."); }
+  } catch(e){
+    const msg = e && e.message && e.message !== "fetch failed" ? e.message : "Could not fetch this video. It may be private, deleted, or the platform is temporarily blocking requests. Try again in a moment.";
+    fail(msg);
+  }
   btn.disabled = false; $("goTxt").textContent = "Download";
 };
 
