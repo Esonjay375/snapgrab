@@ -1,6 +1,24 @@
 from http.server import BaseHTTPRequestHandler
-import json, os, urllib.parse
+import json, os, urllib.parse, urllib.request, http.cookiejar
 import yt_dlp
+
+def ensure_visitor_cookies(cookie_file="/tmp/yt_vis.txt"):
+    try:
+        if os.path.exists(cookie_file) and os.path.getsize(cookie_file) > 50:
+            return cookie_file
+        cj = http.cookiejar.MozillaCookieJar(cookie_file)
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
+        req = urllib.request.Request("https://www.youtube.com/", headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
+        with opener.open(req, timeout=10) as resp:
+            cj.save(ignore_discard=True, ignore_expires=True)
+            return cookie_file
+    except Exception:
+        pass
+    return None
 
 # Optional anti-abuse: set ALLOWED_ORIGIN env var in Vercel → e.g. https://yourapp.vercel.app
 ALLOWED = os.environ.get("ALLOWED_ORIGIN", "")
@@ -96,6 +114,10 @@ class handler(BaseHTTPRequestHandler):
                         ydl_opts["cookiefile"] = cookie_file
                     except Exception:
                         pass
+                else:
+                    vis = ensure_visitor_cookies()
+                    if vis:
+                        ydl_opts["cookiefile"] = vis
 
                 info = None
                 # Attempt 1: Android client (provides progressive format 18/22 with audio)
