@@ -45,6 +45,18 @@ def get_cookie_path(path="/tmp/yt_cookies.txt"):
         return os.path.abspath("cookies.txt")
     return None
 
+def get_js_runtime():
+    # Check bundled QuickJS binary
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    qjs_path = os.path.join(base, "bin", "qjs")
+    if os.path.exists(qjs_path):
+        try:
+            os.chmod(qjs_path, 0o755)
+        except Exception:
+            pass
+        return {"quickjs": {"path": qjs_path}}
+    return None
+
 # Optional anti-abuse: set ALLOWED_ORIGIN env var in Vercel → e.g. https://yourapp.vercel.app
 ALLOWED = os.environ.get("ALLOWED_ORIGIN", "")
 
@@ -112,21 +124,16 @@ class handler(BaseHTTPRequestHandler):
                 cp = get_cookie_path()
                 has_cookie = os.path.exists(cp) if cp else False
                 size = os.path.getsize(cp) if has_cookie else 0
-                candidates = [
-                    shutil.which("node"),
-                    "/var/lang/bin/node",
-                    "/usr/bin/node",
-                    "/usr/local/bin/node",
-                    "/opt/nodejs/bin/node",
-                    "/var/runtime/node",
-                ]
-                found = [p for p in candidates if p and os.path.exists(p)]
+                jsr = get_js_runtime()
+                qjs_path = jsr.get("quickjs", {}).get("path") if jsr else None
+                qjs_exists = os.path.exists(qjs_path) if qjs_path else False
                 return self._send(200, {
                     "has_cookie": has_cookie,
                     "cookie_size": size,
                     "cookie_path": cp,
-                    "found_node": found,
-                    "env_path": os.environ.get("PATH"),
+                    "qjs_path": qjs_path,
+                    "qjs_exists": qjs_exists,
+                    "qjs_size": os.path.getsize(qjs_path) if qjs_exists else 0,
                 })
             url = (qs.get("url") or [""])[0].strip()
             if not url:
@@ -153,7 +160,9 @@ class handler(BaseHTTPRequestHandler):
                 cp = get_cookie_path()
                 if cp:
                     ydl_opts["cookiefile"] = cp
-                ydl_opts["js_runtimes"] = {"node": {}}
+                jsr = get_js_runtime()
+                if jsr:
+                    ydl_opts["js_runtimes"] = jsr
                 ydl_opts["remote_components"] = ["ejs:github"]
 
                 info = None
