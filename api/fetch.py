@@ -119,8 +119,20 @@ class handler(BaseHTTPRequestHandler):
                     return self._send(403, {"error": "forbidden"})
 
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            # Health endpoint – returns basic status info
+            if "health" in qs:
+                cp = get_cookie_path()
+                has_cookie = os.path.exists(cp) if cp else False
+                jsr = get_js_runtime()
+                qjs_path = jsr.get("quickjs", {}).get("path") if jsr else None
+                qjs_exists = os.path.exists(qjs_path) if qjs_path else False
+                return self._send(200, {
+                    "status": "ok",
+                    "has_cookie": has_cookie,
+                    "qjs_exists": qjs_exists,
+                })
+            # Diagnostic endpoint – detailed internal diagnostics
             if "diag" in qs:
-                import shutil
                 cp = get_cookie_path()
                 has_cookie = os.path.exists(cp) if cp else False
                 size = os.path.getsize(cp) if has_cookie else 0
