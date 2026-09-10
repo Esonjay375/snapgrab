@@ -151,23 +151,34 @@ class handler(BaseHTTPRequestHandler):
             if not url:
                 return self._send(400, {"error": "missing url"})
 
-            # Direct TikTok handler: avoids IP-bound CDN tokens & extracts clean unwatermarked video
-            if any(k in url.lower() for k in ["tiktok.com", "douyin.com"]):
+            is_tiktok = any(k in url.lower() for k in ["tiktok.com", "douyin.com", "vm.tiktok.com", "vt.tiktok.com"])
+            is_youtube = any(k in url.lower() for k in ["youtube.com", "youtu.be"])
+            is_instagram = any(k in url.lower() for k in ["instagram.com", "instagr.am"])
+            is_facebook = any(k in url.lower() for k in ["facebook.com", "fb.watch", "fb.com"])
+
+            proxy = os.environ.get("HTTP_PROXY") or os.environ.get("PROXY_URL") or os.environ.get("HTTPS_PROXY")
+
+            # --- TikTok: try dedicated API first, fall through to yt-dlp if it fails ---
+            if is_tiktok:
                 tt_data = fetch_tiktok(url)
                 if tt_data:
                     return self._send(200, tt_data)
+                # fall through to yt-dlp below
 
-            is_youtube = any(k in url.lower() for k in ["youtube.com", "youtu.be"])
-            proxy = os.environ.get("HTTP_PROXY") or os.environ.get("PROXY_URL") or os.environ.get("HTTPS_PROXY")
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
                 "skip_download": True,
                 "noplaylist": True,
                 "socket_timeout": 25,
+                "http_headers": {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
             }
             if proxy:
                 ydl_opts["proxy"] = proxy
+
             if is_youtube:
                 cp = get_cookie_path()
                 if cp:
@@ -188,9 +199,22 @@ class handler(BaseHTTPRequestHandler):
                     ydl_opts["extractor_args"] = {"youtube": {"player_client": ["visionos"]}}
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         info = ydl.extract_info(url, download=False)
-            else:
+
+            elif is_instagram:
+                ydl_opts["http_headers"]["Referer"] = "https://www.instagram.com/"
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
+
+            elif is_facebook:
+                ydl_opts["http_headers"]["Referer"] = "https://www.facebook.com/"
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+
+            else:
+                # TikTok fallback via yt-dlp, or any other platform
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+
 
             if isinstance(info, dict) and info.get("entries"):
                 info = info["entries"][0]
