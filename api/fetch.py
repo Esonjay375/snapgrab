@@ -172,10 +172,9 @@ class handler(BaseHTTPRequestHandler):
                 cp = get_cookie_path()
                 if cp:
                     ydl_opts["cookiefile"] = cp
-                jsr = get_js_runtime()
-                if jsr:
-                    ydl_opts["js_runtimes"] = jsr
-                ydl_opts["remote_components"] = ["ejs:github"]
+
+                # iOS client: no JS challenge needed, returns full 1080p/720p DASH streams
+                ydl_opts["extractor_args"] = {"youtube": {"player_client": ["ios"]}}
 
                 info = None
                 try:
@@ -184,8 +183,8 @@ class handler(BaseHTTPRequestHandler):
                     if not info or not info.get("formats"):
                         raise Exception("No formats returned")
                 except Exception:
-                    # Fallback: visionos client
-                    ydl_opts["extractor_args"] = {"youtube": {"player_client": ["visionos"]}}
+                    # Fallback: tv_embedded client (also no JS challenge)
+                    ydl_opts["extractor_args"] = {"youtube": {"player_client": ["tv_embedded"]}}
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         info = ydl.extract_info(url, download=False)
             else:
