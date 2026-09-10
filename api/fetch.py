@@ -1,4 +1,4 @@
-﻿from http.server import BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler
 import json, os, urllib.parse, urllib.request, http.cookiejar
 import yt_dlp
 
@@ -304,19 +304,18 @@ class handler(BaseHTTPRequestHandler):
                     })
                     seen_labels.add(label)
 
-            # 3. If muxed streams exist, but higher resolution video-only streams exist (e.g. YouTube 720p/1080p)
+            # 3. Add ALL video-only streams (e.g. YouTube 720p/1080p DASH) with clean labels
             for res in sorted(video_only_streams, reverse=True):
-                if res > max(muxed_streams.keys(), default=0):
-                    label = f"{res_label(res)} (No Audio)" if muxed_streams else res_label(res)
-                    if label in seen_labels:
-                        continue
-                    f = video_only_streams[res]
-                    formats.append({
-                        "label": label,
-                        "url": f["url"],
-                        "audio": False,
-                    })
-                    seen_labels.add(label)
+                label = res_label(res)
+                if label in seen_labels:
+                    continue
+                f = video_only_streams[res]
+                formats.append({
+                    "label": label,
+                    "url": f["url"],
+                    "audio": False,
+                })
+                seen_labels.add(label)
 
             # 4. Add Audio MP3 option
             # If a dedicated audio stream exists, use it. Otherwise, use the smallest
