@@ -173,20 +173,22 @@ class handler(BaseHTTPRequestHandler):
                 if cp:
                     ydl_opts["cookiefile"] = cp
 
-                # iOS client: no JS challenge needed, returns full 1080p/720p DASH streams
-                ydl_opts["extractor_args"] = {"youtube": {"player_client": ["ios"]}}
-
                 info = None
-                try:
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(url, download=False)
-                    if not info or not info.get("formats"):
+                last_exc = None
+                # Try multiple clients in order — cookies authenticate the web session
+                for client in [["web"], ["ios"], ["tv_embedded"]]:
+                    try:
+                        ydl_opts["extractor_args"] = {"youtube": {"player_client": client}}
+                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                            info = ydl.extract_info(url, download=False)
+                        if info and info.get("formats"):
+                            break  # success
                         raise Exception("No formats returned")
-                except Exception:
-                    # Fallback: tv_embedded client (also no JS challenge)
-                    ydl_opts["extractor_args"] = {"youtube": {"player_client": ["tv_embedded"]}}
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        info = ydl.extract_info(url, download=False)
+                    except Exception as exc:
+                        last_exc = exc
+                        info = None
+                if not info:
+                    raise last_exc or Exception("All YouTube clients failed")
             else:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
