@@ -274,9 +274,12 @@ class handler(BaseHTTPRequestHandler):
 
             formats = []
             seen_labels = set()
+            MIN_VIDEO_RES = 720 if is_youtube else 0  # YouTube: 720p minimum; other platforms: no limit
 
             # 1. ALWAYS PRIORITIZE MUXED STREAMS (WITH AUDIO)
             for res in sorted(muxed_streams, reverse=True):
+                if res < MIN_VIDEO_RES:
+                    continue
                 label = res_label(res)
                 if label in seen_labels:
                     continue
@@ -306,6 +309,8 @@ class handler(BaseHTTPRequestHandler):
 
             # 3. Add ALL video-only streams (e.g. YouTube 720p/1080p DASH) with clean labels
             for res in sorted(video_only_streams, reverse=True):
+                if res < MIN_VIDEO_RES:
+                    continue
                 label = res_label(res)
                 if label in seen_labels:
                     continue
