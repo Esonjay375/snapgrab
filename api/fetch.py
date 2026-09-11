@@ -258,6 +258,13 @@ class handler(BaseHTTPRequestHandler):
 
             is_youtube = any(k in url.lower() for k in ["youtube.com", "youtu.be"])
             proxy = os.environ.get("HTTP_PROXY") or os.environ.get("PROXY_URL") or os.environ.get("HTTPS_PROXY")
+
+            # --- YouTube: try cobalt.tools first (bypasses Vercel IP block) ---
+            if is_youtube:
+                yt_data = fetch_youtube_cobalt(url)
+                if yt_data:
+                    return self._send(200, yt_data)
+
             ydl_opts = {
                 "quiet": True,
                 "no_warnings": True,
