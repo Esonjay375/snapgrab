@@ -61,40 +61,61 @@ def get_js_runtime():
 ALLOWED = os.environ.get("ALLOWED_ORIGIN", "")
 
 def fetch_tiktok(url):
+    encoded = urllib.parse.quote(url)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+    }
+
+    # --- API 1: tikwm ---
     try:
-        api_url = f"https://www.tikwm.com/api/?url={urllib.parse.quote(url)}"
-        req = urllib.request.Request(api_url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-            "Accept": "application/json",
-        })
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        req = urllib.request.Request(
+            f"https://www.tikwm.com/api/?url={encoded}",
+            headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="ignore"))
             if data.get("code") == 0 and data.get("data"):
                 d = data["data"]
                 formats = []
-                hd_url = d.get("hdplay")
-                play_url = d.get("play")
-                wm_url = d.get("wmplay")
-                music_url = d.get("music")
-                if hd_url:
-                    formats.append({"label": "1080p HD", "url": hd_url, "audio": False})
-                if play_url:
-                    formats.append({"label": "720p", "url": play_url, "audio": False})
-                elif wm_url:
-                    formats.append({"label": "720p", "url": wm_url, "audio": False})
-                if music_url:
-                    formats.append({"label": "Audio MP3", "url": music_url, "audio": True})
+                if d.get("hdplay"): formats.append({"label": "1080p HD", "url": d["hdplay"], "audio": False})
+                if d.get("play"):   formats.append({"label": "720p",    "url": d["play"],   "audio": False})
+                elif d.get("wmplay"): formats.append({"label": "720p",  "url": d["wmplay"], "audio": False})
+                if d.get("music"):  formats.append({"label": "Audio MP3","url": d["music"], "audio": True})
                 if formats:
                     dur = int(d.get("duration") or 0)
-                    return {
-                        "title": d.get("title") or "TikTok Video",
-                        "duration": f"{dur // 60}:{dur % 60:02d}",
-                        "thumbnail": d.get("cover") or d.get("origin_cover") or "",
-                        "formats": formats,
-                    }
+                    return {"title": d.get("title") or "TikTok Video",
+                            "duration": f"{dur//60}:{dur%60:02d}",
+                            "thumbnail": d.get("cover") or d.get("origin_cover") or "",
+                            "formats": formats}
     except Exception:
         pass
+
+    # --- API 2: tikmate ---
+    try:
+        req = urllib.request.Request(
+            f"https://api.tikmate.app/api/lookup?url={encoded}",
+            headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            if data.get("success") and data.get("id"):
+                vid_id = data["id"]
+                author = data.get("author_unique_id", "")
+                video_url = f"https://tikmate.app/download/{vid_id}/{author}.mp4"
+                audio_url = f"https://tikmate.app/download/{vid_id}/{author}.mp3"
+                formats = [
+                    {"label": "720p", "url": video_url, "audio": False},
+                    {"label": "Audio MP3", "url": audio_url, "audio": True},
+                ]
+                dur = int(data.get("duration") or 0)
+                return {"title": data.get("text") or "TikTok Video",
+                        "duration": f"{dur//60}:{dur%60:02d}",
+                        "thumbnail": data.get("cover") or "",
+                        "formats": formats}
+    except Exception:
+        pass
+
     return None
+
 
 class handler(BaseHTTPRequestHandler):
     def _send(self, code, obj):
