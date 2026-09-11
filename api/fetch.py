@@ -175,14 +175,20 @@ class handler(BaseHTTPRequestHandler):
 
                 info = None
                 last_exc = None
-                # Try multiple clients in order — cookies authenticate the web session
-                for client in [["web"], ["ios"], ["tv_embedded"]]:
+                # Try clients in order. player_skip bypasses JS/webpage challenge.
+                strategies = [
+                    {"player_client": ["web"], "player_skip": ["webpage", "configs", "js"]},
+                    {"player_client": ["web_creator"], "player_skip": ["webpage", "configs", "js"]},
+                    {"player_client": ["ios"]},
+                    {"player_client": ["tv_embedded"]},
+                ]
+                for args in strategies:
                     try:
-                        ydl_opts["extractor_args"] = {"youtube": {"player_client": client}}
+                        ydl_opts["extractor_args"] = {"youtube": args}
                         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                             info = ydl.extract_info(url, download=False)
                         if info and info.get("formats"):
-                            break  # success
+                            break
                         raise Exception("No formats returned")
                     except Exception as exc:
                         last_exc = exc
