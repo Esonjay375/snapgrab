@@ -57,8 +57,86 @@ def get_js_runtime():
         return {"quickjs": {"path": qjs_path}}
     return None
 
-# Optional anti-abuse: set ALLOWED_ORIGIN env var in Vercel ΓåÆ e.g. https://yourapp.vercel.app
+# Optional anti-abuse: set ALLOWED_ORIGIN env var in Vercel → e.g. https://yourapp.vercel.app
 ALLOWED = os.environ.get("ALLOWED_ORIGIN", "")
+
+COBALT_HEADERS = {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (compatible; SnapGrab/1.0)",
+}
+
+def fetch_youtube_cobalt(url):
+    """Use cobalt.tools API to extract YouTube — bypasses Vercel IP block."""
+    try:
+        body = json.dumps({"url": url, "videoQuality": "1080", "filenameStyle": "basic"}).encode()
+        req = urllib.request.Request(
+            "https://api.cobalt.tools/",
+            data=body,
+            headers=COBALT_HEADERS,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+
+        status = data.get("status", "")
+        if status == "error":
+            return None
+
+        video_url = None
+        if status in ("stream", "redirect", "tunnel"):
+            video_url = data.get("url")
+        elif status == "picker":
+            # picker returns multiple streams — pick the best video
+            for item in data.get("picker", []):
+                if item.get("type") == "video":
+                    video_url = item.get("url")
+                    break
+
+        if not video_url:
+            return None
+
+        # Get audio via a second cobalt call
+        audio_url = None
+        try:
+            abody = json.dumps({"url": url, "downloadMode": "audio", "audioFormat": "mp3"}).encode()
+            areq = urllib.request.Request(
+                "https://api.cobalt.tools/",
+                data=abody,
+                headers=COBALT_HEADERS,
+                method="POST",
+            )
+            with urllib.request.urlopen(areq, timeout=20) as aresp:
+                adata = json.loads(aresp.read().decode("utf-8", errors="ignore"))
+            if adata.get("status") in ("stream", "redirect", "tunnel"):
+                audio_url = adata.get("url")
+        except Exception:
+            pass
+
+        # Get title/thumbnail via yt-dlp (lightweight — no JS challenge needed for metadata only)
+        title, thumbnail, duration = "YouTube Video", "", "0:00"
+        try:
+            import yt_dlp as _ytdlp
+            with _ytdlp.YoutubeDL({"quiet": True, "skip_download": True,
+                                    "extract_flat": True, "socket_timeout": 10}) as ydl:
+                meta = ydl.extract_info(url, download=False)
+                title = meta.get("title") or title
+                thumbnail = meta.get("thumbnail") or thumbnail
+                dur = int(meta.get("duration") or 0)
+                duration = f"{dur//60}:{dur%60:02d}"
+        except Exception:
+            pass
+
+        formats = [{"label": "1080p HD", "url": video_url, "audio": False}]
+        if audio_url:
+            formats.append({"label": "Audio MP3", "url": audio_url, "audio": True})
+        else:
+            formats.append({"label": "Audio MP3", "url": video_url, "audio": True})
+
+        return {"title": title, "duration": duration, "thumbnail": thumbnail, "formats": formats}
+    except Exception:
+        return None
+
 
 def fetch_tiktok(url):
     encoded = urllib.parse.quote(url)
