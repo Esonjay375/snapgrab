@@ -60,82 +60,102 @@ def get_js_runtime():
 # Optional anti-abuse: set ALLOWED_ORIGIN env var in Vercel → e.g. https://yourapp.vercel.app
 ALLOWED = os.environ.get("ALLOWED_ORIGIN", "")
 
-COBALT_HEADERS = {
-    "Accept": "application/json",
-    "Content-Type": "application/json",
-    "User-Agent": "Mozilla/5.0 (compatible; SnapGrab/1.0)",
-}
+INVIDIOUS_INSTANCES = [
+    "https://inv.tux.pizza",
+    "https://invidious.nerdvpn.de",
+    "https://yewtu.be",
+    "https://invidious.privacydev.net",
+    "https://iv.melmac.space",
+]
 
-def fetch_youtube_cobalt(url):
-    """Use cobalt.tools API to extract YouTube — bypasses Vercel IP block."""
-    try:
-        body = json.dumps({"url": url, "videoQuality": "1080", "filenameStyle": "basic"}).encode()
-        req = urllib.request.Request(
-            "https://api.cobalt.tools/",
-            data=body,
-            headers=COBALT_HEADERS,
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+def _yt_video_id(url):
+    parsed = urllib.parse.urlparse(url)
+    qs = urllib.parse.parse_qs(parsed.query)
+    if "v" in qs:
+        return qs["v"][0]
+    # youtu.be/ID or /shorts/ID or /embed/ID
+    path = parsed.path.lstrip("/")
+    for prefix in ("shorts/", "embed/", "v/"):
+        if path.startswith(prefix):
+            return path[len(prefix):].split("/")[0].split("?")[0]
+    return path.split("/")[0].split("?")[0] or None
 
-        status = data.get("status", "")
-        if status == "error":
-            return None
-
-        video_url = None
-        if status in ("stream", "redirect", "tunnel"):
-            video_url = data.get("url")
-        elif status == "picker":
-            # picker returns multiple streams — pick the best video
-            for item in data.get("picker", []):
-                if item.get("type") == "video":
-                    video_url = item.get("url")
-                    break
-
-        if not video_url:
-            return None
-
-        # Get audio via a second cobalt call
-        audio_url = None
-        try:
-            abody = json.dumps({"url": url, "downloadMode": "audio", "audioFormat": "mp3"}).encode()
-            areq = urllib.request.Request(
-                "https://api.cobalt.tools/",
-                data=abody,
-                headers=COBALT_HEADERS,
-                method="POST",
-            )
-            with urllib.request.urlopen(areq, timeout=20) as aresp:
-                adata = json.loads(aresp.read().decode("utf-8", errors="ignore"))
-            if adata.get("status") in ("stream", "redirect", "tunnel"):
-                audio_url = adata.get("url")
-        except Exception:
-            pass
-
-        # Get title/thumbnail via yt-dlp (lightweight — no JS challenge needed for metadata only)
-        title, thumbnail, duration = "YouTube Video", "", "0:00"
-        try:
-            import yt_dlp as _ytdlp
-            with _ytdlp.YoutubeDL({"quiet": True, "skip_download": True,
-                                    "extract_flat": True, "socket_timeout": 10}) as ydl:
-                meta = ydl.extract_info(url, download=False)
-                title = meta.get("title") or title
-                thumbnail = meta.get("thumbnail") or thumbnail
-                dur = int(meta.get("duration") or 0)
-                duration = f"{dur//60}:{dur%60:02d}"
-        except Exception:
-            pass
-
-        formats = [{"label": "1080p HD", "url": video_url, "audio": False}]
-        if audio_url:
-            formats.append({"label": "Audio MP3", "url": audio_url, "audio": True})
-        else:
-            formats.append({"label": "Audio MP3", "url": video_url, "audio": True})
-
-        return {"title": title, "duration": duration, "thumbnail": thumbnail, "formats": formats}
-    except Exception:
+def fetch_youtube_invidious(url):
+    """Query public Invidious instances for YouTube stream URLs — no bot detection."""
+    vid = _yt_video_id(url)
+    if not vid:
         return None
+
+    api_headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; SnapGrab/1.0)",
+        "Accept": "application/json",
+    }
+
+    for base in INVIDIOUS_INSTANCES:
+        try:
+            req = urllib.request.Request(
+                f"{base}/api/v1/videos/{vid}?fields=title,lengthSeconds,videoThumbnails,adaptiveFormats,formatStreams",
+                headers=api_headers,
+            )
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+
+            title = data.get("title") or "YouTube Video"
+            dur = int(data.get("lengthSeconds") or 0)
+            duration = f"{dur//60}:{dur%60:02d}"
+            thumbs = data.get("videoThumbnails") or []
+            thumbnail = next((t["url"] for t in thumbs if t.get("quality") in ("high", "medium", "sddefault")), "")
+            if thumbnail and thumbnail.startswith("/"):
+                thumbnail = base + thumbnail
+
+            # Collect video streams (adaptive = video-only DASH)
+            video_streams = {}  # res -> url
+            audio_url = None
+            best_audio_bitrate = 0
+
+            for f in data.get("adaptiveFormats") or []:
+                ftype = f.get("type") or ""
+                furl = f.get("url") or ""
+                if not furl:
+                    continue
+                if "video/" in ftype and "vp9" not in ftype.lower():
+                    res = int(f.get("resolution", "0p").replace("p", "") or 0)
+                    if res >= 720 and res not in video_streams:
+                        video_streams[res] = furl
+                elif "audio/" in ftype:
+                    bitrate = int(f.get("bitrate") or 0)
+                    if bitrate > best_audio_bitrate:
+                        best_audio_bitrate = bitrate
+                        audio_url = furl
+
+            # formatStreams = muxed (video+audio), usually 360p/720p
+            for f in data.get("formatStreams") or []:
+                furl = f.get("url") or ""
+                ftype = f.get("type") or ""
+                if not furl or "video/" not in ftype:
+                    continue
+                res = int(f.get("resolution", "0p").replace("p", "") or 0)
+                if res >= 720 and res not in video_streams:
+                    video_streams[res] = furl
+
+            formats = []
+            for res in sorted(video_streams, reverse=True):
+                label = "1080p HD" if res >= 1080 else ("720p" if res >= 720 else f"{res}p")
+                if label not in [x["label"] for x in formats]:
+                    formats.append({"label": label, "url": video_streams[res], "audio": False})
+
+            if audio_url:
+                formats.append({"label": "Audio MP3", "url": audio_url, "audio": True})
+            elif formats:
+                formats.append({"label": "Audio MP3", "url": formats[-1]["url"], "audio": True})
+
+            if formats:
+                return {"title": title, "duration": duration, "thumbnail": thumbnail, "formats": formats}
+
+        except Exception:
+            continue  # try next instance
+
+    return None
 
 
 def fetch_tiktok(url):
