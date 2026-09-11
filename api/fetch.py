@@ -193,29 +193,46 @@ class handler(BaseHTTPRequestHandler):
                 cp = get_cookie_path()
                 if cp:
                     ydl_opts["cookiefile"] = cp
+                # Primary: QuickJS + EJS challenge solver (confirmed working on Vercel)
+                jsr = get_js_runtime()
+                if jsr:
+                    ydl_opts["js_runtimes"] = jsr
+                ydl_opts["remote_components"] = ["ejs:github"]
 
                 info = None
                 last_exc = None
-                # Try clients in order. player_skip bypasses JS/webpage challenge.
-                strategies = [
-                    {"player_client": ["web"], "player_skip": ["webpage", "configs", "js"]},
-                    {"player_client": ["web_creator"], "player_skip": ["webpage", "configs", "js"]},
-                    {"player_client": ["ios"]},
-                    {"player_client": ["tv_embedded"]},
-                ]
-                for args in strategies:
-                    try:
-                        ydl_opts["extractor_args"] = {"youtube": args}
-                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                            info = ydl.extract_info(url, download=False)
-                        if info and info.get("formats"):
-                            break
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        info = ydl.extract_info(url, download=False)
+                    if not info or not info.get("formats"):
                         raise Exception("No formats returned")
-                    except Exception as exc:
-                        last_exc = exc
-                        info = None
+                except Exception as exc:
+                    last_exc = exc
+                    info = None
+
+                # Fallbacks: player_skip strategies (no JS runtime needed)
                 if not info:
-                    raise last_exc or Exception("All YouTube clients failed")
+                    for args in [
+                        {"player_client": ["web"], "player_skip": ["webpage", "configs", "js"]},
+                        {"player_client": ["web_creator"], "player_skip": ["webpage", "configs", "js"]},
+                        {"player_client": ["tv_embedded"]},
+                    ]:
+                        try:
+                            ydl_opts["extractor_args"] = {"youtube": args}
+                            ydl_opts.pop("js_runtimes", None)
+                            ydl_opts.pop("remote_components", None)
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                                info = ydl.extract_info(url, download=False)
+                            if info and info.get("formats"):
+                                break
+                            raise Exception("No formats")
+                        except Exception as exc:
+                            last_exc = exc
+                            info = None
+
+                if not info:
+                    raise last_exc or Exception("All YouTube strategies failed")
+
             else:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
