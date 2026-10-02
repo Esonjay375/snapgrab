@@ -1,4 +1,4 @@
-﻿from http.server import BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler
 import urllib.parse, urllib.request, os, re
 
 ALLOWED = os.environ.get("ALLOWED_ORIGIN", "")
@@ -24,35 +24,53 @@ class handler(BaseHTTPRequestHandler):
             if ALLOWED:
                 ref = (self.headers.get("Referer") or "") + (self.headers.get("Origin") or "")
                 if ALLOWED not in ref:
-                    self.send_response(403); self.end_headers(); return
+                    self.send_response(403)
+                    self.end_headers()
+                    return
 
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             target = (qs.get("url") or [""])[0].strip()
             filename = (qs.get("filename") or [""])[0].strip()
-            if not target:
-                self.send_response(400); self.end_headers(); return
 
+            if not target:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self._cors()
+                self.end_headers()
+                self.wfile.write(b'{"error":"missing url"}')
+                return
+
+            # Build request headers
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                              "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/125.0.0.0 Safari/537.36"
+                ),
                 "Accept": "*/*",
                 "Accept-Language": "en-US,en;q=0.9",
                 "Sec-Fetch-Mode": "navigate",
             }
 
+            # Add Referer based on target domain (helps with some CDNs)
             if any(d in target.lower() for d in ["tiktok", "byteimg", "musical.ly", "douyin"]):
                 headers["Referer"] = "https://www.tiktok.com/"
-            elif any(d in target.lower() for d in ["youtube", "googlevideo"]):
+            elif any(d in target.lower() for d in ["youtube", "googlevideo", "youtu.be"]):
                 headers["Referer"] = "https://www.youtube.com/"
+            elif "instagram" in target.lower():
+                headers["Referer"] = "https://www.instagram.com/"
+            elif "facebook" in target.lower() or "fbcdn" in target.lower():
+                headers["Referer"] = "https://www.facebook.com/"
 
             req = urllib.request.Request(target, headers=headers)
 
-            with urllib.request.urlopen(req, timeout=25) as resp:
+            # Slightly higher timeout for large video files
+            with urllib.request.urlopen(req, timeout=40) as resp:
                 status = resp.status
                 content_type = resp.headers.get("Content-Type", "application/octet-stream")
                 content_length = resp.headers.get("Content-Length")
 
-                # If this is an audio download request, ensure audio MIME type
+                # Force audio/mpeg for .mp3 filenames
                 if filename and filename.lower().endswith(".mp3"):
                     content_type = "audio/mpeg"
 
@@ -65,7 +83,10 @@ class handler(BaseHTTPRequestHandler):
 
                 if filename:
                     safe_filename = re.sub(r'[^\w\-.]', '_', filename)
-                    self.send_header("Content-Disposition", f'attachment; filename="{safe_filename}"')
+                    self.send_header(
+                        "Content-Disposition",
+                        f'attachment; filename="{safe_filename}"'
+                    )
 
                 self.end_headers()
 
@@ -80,7 +101,8 @@ class handler(BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
 
         except Exception as e:
-            # If server-side fetch fails, redirect directly to the source URL so download never fails
+            # If proxy fetch fails, redirect client directly to the source URL
+            # so the download can still proceed without server-side streaming.
             try:
                 if target:
                     self.send_response(302)
