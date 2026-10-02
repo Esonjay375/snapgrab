@@ -61,11 +61,12 @@ niche start with Adsterra/Monetag. You also can't run ads until you have some tr
 **Honest note:** no one can guarantee "#1 in SEO" — it takes 3–6 months of content +
 backlinks. The technical foundation here is solid; the content work is on you.
 
-## ⚖️ Important legal reality
-
+⚖️ Final Integrated User Terms & Liability Waiver
 The use of this platform and the decision to download any media is at the sole discretion, choice, and risk of the user.
+• Independence & Non-Affiliation: SnapGrab is an independent tool and is not affiliated with Instagram, TikTok, Facebook, or YouTube.
 • Tool-Only Service: This platform strictly provides a technical utility for content downloading. We do not host, store, or monitor any files, nor do we verify the ownership or intended use of the media.
 • Zero Platform Liability: The user bears total responsibility for how they use this service and the content they retrieve. This platform has no affiliation with the owners of the content or the social networks listed, and accepts zero liability for any user actions.
+• User Responsibility: SnapGrab operates strictly as an automated infrastructure capable of downloading any publicly available media from supported networks. The platform functions blindly without verifying user authorization, ownership, or licensing. The choice, purpose, and final usage of any downloaded media rest exclusively with you, and you assume all responsibility regarding the targeted platform's terms and copyright rights.
 
 
 ## 📁 Files
