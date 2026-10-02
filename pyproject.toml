@@ -10,4 +10,4 @@ readme = "README.md"
 requires-python = ">=3.9"
 
 [tool.vercel]
-entrypoint = "api/fetch.py"
+entrypoint = "api.fetch:handler"
