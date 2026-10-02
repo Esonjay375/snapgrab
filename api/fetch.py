@@ -2,109 +2,311 @@ from http.server import BaseHTTPRequestHandler
 import json
 import os
 import urllib.parse
-import urllib.request
+import yt_dlp
 
-INVIDIOUS_INSTANCES = [
-    "https://inv.tux.pizza",
-    "https://invidious.nerdvpn.de",
-    "https://yewtu.be",
-    "https://invidious.privacydev.net",
-    "https://iv.melmac.space",
-]
+ALLOWED = os.environ.get("ALLOWED_ORIGIN", "")
 
-def extract_yt_id(url):
-    parsed = urllib.parse.urlparse(url)
-    qs = urllib.parse.parse_qs(parsed.query)
-    if "v" in qs:
-        return qs["v"][0]
-    path = parsed.path.lstrip("/")
-    for prefix in ("shorts/", "embed/", "v/"):
-        if path.startswith(prefix):
-            return path[len(prefix):].split("/")[0].split("?")[0]
-    return path.split("/")[0].split("?")[0] or None
 
-def fetch_youtube_data(url):
-    vid = extract_yt_id(url)
-    if not vid:
-        return None
+def is_youtube_url(url):
+    host = urllib.parse.urlparse(url).netloc.lower()
+    return any(domain in host for domain in [
+        "youtube.com",
+        "youtu.be",
+        "youtube-nocookie.com",
+    ])
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Accept": "application/json",
+
+def is_tiktok_url(url):
+    host = urllib.parse.urlparse(url).netloc.lower()
+    return any(domain in host for domain in [
+        "tiktok.com",
+        "vm.tiktok.com",
+        "vt.tiktok.com",
+        "douyin.com",
+    ])
+
+
+def clean_title(value):
+    value = value or "Video"
+    return str(value).strip()[:200]
+
+
+def duration_label(seconds):
+    try:
+        seconds = int(seconds or 0)
+    except (ValueError, TypeError):
+        seconds = 0
+
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    remaining = seconds % 60
+
+    if hours:
+        return f"{hours}:{minutes:02d}:{remaining:02d}"
+    return f"{minutes}:{remaining:02d}"
+
+
+def resolution_label(height, width):
+    try:
+        height = int(height or 0)
+        width = int(width or 0)
+    except (ValueError, TypeError):
+        return "Video"
+
+    resolution = min(height, width) if height and width else (height or width)
+
+    if resolution >= 2160:
+        return "4K"
+    if resolution >= 1440:
+        return "1440p"
+    if resolution >= 1080:
+        return "1080p HD"
+    if resolution >= 720:
+        return "720p"
+    if resolution >= 480:
+        return "480p"
+    if resolution >= 360:
+        return "360p"
+    if resolution:
+        return f"{resolution}p"
+    return "Video"
+
+
+def get_ytdlp_options():
+    return {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "socket_timeout": 45,
+        "retries": 2,
+        "extractor_retries": 2,
+        "fragment_retries": 2,
+        "geo_bypass": True,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
     }
 
-    for base in INVIDIOUS_INSTANCES:
+
+def extract_with_fallbacks(url):
+    """
+    Attempt normal yt-dlp extraction, then try YouTube player-client fallbacks.
+    Returns a single-video info dictionary or raises the last useful error.
+    """
+    attempts = [
+        None,
+        {
+            "youtube": {
+                "player_client": ["web_creator", "mweb", "tv_embedded"]
+            }
+        },
+        {
+            "youtube": {
+                "player_client": ["tv_embedded"]
+            }
+        },
+        {
+            "youtube": {
+                "player_client": ["web"]
+            }
+        },
+    ]
+
+    last_error = None
+
+    for extractor_args in attempts:
+        options = get_ytdlp_options()
+
+        proxy = (
+            os.environ.get("HTTPS_PROXY")
+            or os.environ.get("HTTP_PROXY")
+            or os.environ.get("PROXY_URL")
+        )
+        if proxy:
+            options["proxy"] = proxy
+
+        if extractor_args:
+            options["extractor_args"] = extractor_args
+
         try:
-            req_url = f"{base}/api/v1/videos/{vid}?fields=title,lengthSeconds,videoThumbnails,adaptiveFormats,formatStreams"
-            req = urllib.request.Request(req_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(url, download=False)
 
-            title = data.get("title") or "YouTube Video"
-            dur = int(data.get("lengthSeconds") or 0)
-            duration = f"{dur // 60}:{dur % 60:02d}"
-            
-            thumbs = data.get("videoThumbnails") or []
-            thumbnail = next((t["url"] for t in thumbs if t.get("quality") in ("high", "medium", "sddefault")), "")
-            if thumbnail and thumbnail.startswith("/"):
-                thumbnail = base + thumbnail
+            if not info:
+                raise RuntimeError("No data was returned by yt-dlp")
 
-            video_streams = {}
-            audio_url = None
-            best_audio_bitrate = 0
+            # Should not occur with noplaylist=True, but safely handle it.
+            if isinstance(info, dict) and info.get("entries"):
+                entries = [entry for entry in info.get("entries", []) if entry]
+                if not entries:
+                    raise RuntimeError("The playlist does not contain an available video")
+                info = entries[0]
 
-            # Collect adaptive streams
-            for f in data.get("adaptiveFormats") or []:
-                ftype = f.get("type") or ""
-                furl = f.get("url") or ""
-                if not furl:
-                    continue
-                if "video/" in ftype and "vp9" not in ftype.lower():
-                    res = int(f.get("resolution", "0p").replace("p", "") or 0)
-                    if res >= 360 and res not in video_streams:
-                        video_streams[res] = furl
-                elif "audio/" in ftype:
-                    bitrate = int(f.get("bitrate") or 0)
-                    if bitrate > best_audio_bitrate:
-                        best_audio_bitrate = bitrate
-                        audio_url = furl
+            if not isinstance(info, dict):
+                raise RuntimeError("yt-dlp returned an invalid response")
 
-            # Collect muxed format streams
-            for f in data.get("formatStreams") or []:
-                furl = f.get("url") or ""
-                ftype = f.get("type") or ""
-                if not furl or "video/" not in ftype:
-                    continue
-                res = int(f.get("resolution", "0p").replace("p", "") or 0)
-                if res >= 360 and res not in video_streams:
-                    video_streams[res] = furl
+            if info.get("formats") or info.get("url"):
+                return info
 
-            formats = []
-            for res in sorted(video_streams, reverse=True):
-                label = f"{res}p HD" if res >= 720 else f"{res}p"
-                formats.append({"label": label, "url": video_streams[res], "audio": False})
+            raise RuntimeError("No downloadable formats were returned")
 
-            if audio_url:
-                formats.append({"label": "Audio MP3", "url": audio_url, "audio": True})
+        except Exception as error:
+            last_error = error
 
-            if formats:
-                return {
-                    "title": title,
-                    "duration": duration,
-                    "thumbnail": thumbnail,
-                    "formats": formats
-                }
-        except Exception:
+    raise last_error or RuntimeError("All video extraction methods failed")
+
+
+def build_formats(info):
+    """
+    Return direct source URLs grouped as:
+    - Progressive/muxed video (video + audio)
+    - Video-only streams when no progressive stream exists at a given quality
+    - Best available audio stream
+
+    Note: Video-only DASH streams need FFmpeg merging with audio for a finished
+    file that includes sound. Vercel cannot reliably perform that merge.
+    """
+    all_formats = info.get("formats") or []
+
+    muxed = {}
+    video_only = {}
+    audio_only = []
+
+    for fmt in all_formats:
+        stream_url = fmt.get("url")
+        if not stream_url:
             continue
 
-    return None
+        protocol = str(fmt.get("protocol") or "").lower()
+        ext = str(fmt.get("ext") or "").lower()
+        vcodec = str(fmt.get("vcodec") or "").lower()
+        acodec = str(fmt.get("acodec") or "").lower()
+
+        # Ignore image/storyboard formats. Keep HLS out because browser downloads
+        # of manifests often do not create a real media file.
+        if ext in {"mhtml", "jpg", "jpeg", "png", "webp", "gif"}:
+            continue
+        if "storyboard" in stream_url:
+            continue
+        if "m3u8" in protocol or ".m3u8" in stream_url:
+            continue
+
+        try:
+            height = int(fmt.get("height") or 0)
+            width = int(fmt.get("width") or 0)
+        except (ValueError, TypeError):
+            height, width = 0, 0
+
+        resolution = min(height, width) if height and width else (height or width)
+        bitrate = float(fmt.get("tbr") or fmt.get("abr") or 0)
+
+        has_video = vcodec not in {"", "none"}
+        has_audio = acodec not in {"", "none"}
+
+        if not has_video and has_audio:
+            audio_only.append(fmt)
+            continue
+
+        if has_video and has_audio and resolution:
+            existing = muxed.get(resolution)
+            if not existing or bitrate > float(existing.get("tbr") or 0):
+                muxed[resolution] = fmt
+            continue
+
+        if has_video and not has_audio and resolution:
+            existing = video_only.get(resolution)
+            if not existing or bitrate > float(existing.get("tbr") or 0):
+                video_only[resolution] = fmt
+
+    formats = []
+    seen = set()
+
+    # Give the user progressive formats first: these contain both video and audio.
+    for resolution in sorted(muxed.keys(), reverse=True):
+        fmt = muxed[resolution]
+        label = resolution_label(fmt.get("height"), fmt.get("width"))
+
+        if label in seen:
+            continue
+
+        formats.append({
+            "label": label,
+            "url": fmt["url"],
+            "audio": False,
+            "hasAudio": True,
+            "needsMerge": False,
+            "ext": fmt.get("ext") or "mp4",
+        })
+        seen.add(label)
+
+    # Add video-only streams only if the same quality wasn't already available muxed.
+    # Mark them clearly so the frontend can explain that high-resolution audio
+    # requires a dedicated FFmpeg worker.
+    for resolution in sorted(video_only.keys(), reverse=True):
+        fmt = video_only[resolution]
+        label = resolution_label(fmt.get("height"), fmt.get("width"))
+
+        if label in seen:
+            continue
+
+        formats.append({
+            "label": f"{label} (video only)",
+            "url": fmt["url"],
+            "audio": False,
+            "hasAudio": False,
+            "needsMerge": True,
+            "ext": fmt.get("ext") or "mp4",
+        })
+        seen.add(label)
+
+    # Find the best audio-only format.
+    audio_only.sort(
+        key=lambda fmt: float(fmt.get("abr") or fmt.get("tbr") or 0),
+        reverse=True,
+    )
+
+    if audio_only:
+        best_audio = audio_only[0]
+        formats.append({
+            "label": "Audio source",
+            "url": best_audio["url"],
+            "audio": True,
+            "hasAudio": True,
+            "needsMerge": False,
+            "ext": best_audio.get("ext") or "m4a",
+        })
+
+    # Final fallback if yt-dlp returned one already-selected URL.
+    if not formats and info.get("url"):
+        formats.append({
+            "label": "Video",
+            "url": info["url"],
+            "audio": False,
+            "hasAudio": True,
+            "needsMerge": False,
+            "ext": info.get("ext") or "mp4",
+        })
+
+    return formats
+
 
 class handler(BaseHTTPRequestHandler):
-    def _send(self, code, obj):
-        body = json.dumps(obj).encode("utf-8")
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+    def send_json(self, status_code, payload):
+        body = json.dumps(payload).encode("utf-8")
+
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
         self.wfile.write(body)
 
@@ -112,21 +314,59 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(204)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
     def do_GET(self):
         try:
-            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            url = (qs.get("url") or [""])[0].strip()
+            if ALLOWED:
+                origin = self.headers.get("Origin") or ""
+                referer = self.headers.get("Referer") or ""
+
+                if ALLOWED not in origin and ALLOWED not in referer:
+                    return self.send_json(403, {
+                        "error": "forbidden"
+                    })
+
+            parsed = urllib.parse.urlparse(self.path)
+            query = urllib.parse.parse_qs(parsed.query)
+            url = (query.get("url") or [""])[0].strip()
 
             if not url:
-                return self._send(400, {"error": "missing url"})
+                return self.send_json(400, {
+                    "error": "missing url"
+                })
 
-            data = fetch_youtube_data(url)
-            if data:
-                return self._send(200, data)
-            
-            return self._send(404, {"error": "Could not fetch video details from YouTube"})
+            if not url.startswith(("https://", "http://")):
+                return self.send_json(400, {
+                    "error": "invalid url"
+                })
 
-        except Exception as e:
-            self._send(500, {"error": str(e)[:200]})
+            # This endpoint is intentionally optimized for YouTube first.
+            # yt-dlp may support other public video URLs, but each platform
+            # changes independently and can require a dedicated extractor.
+            info = extract_with_fallbacks(url)
+            formats = build_formats(info)
+
+            if not formats:
+                return self.send_json(404, {
+                    "error": "no downloadable formats found"
+                })
+
+            return self.send_json(200, {
+                "title": clean_title(info.get("title")),
+                "duration": duration_label(info.get("duration")),
+                "thumbnail": info.get("thumbnail") or "",
+                "source": "youtube" if is_youtube_url(url) else "other",
+                "formats": formats,
+            })
+
+        except Exception as error:
+            # Sends the real backend reason to help debugging. Do not expose
+            # private cookies, credentials, or raw stack traces.
+            message = str(error).replace("\n", " ").strip()[:350]
+
+            return self.send_json(500, {
+                "error": "Could not fetch video details",
+                "detail": message or "Unknown extraction error"
+            })
