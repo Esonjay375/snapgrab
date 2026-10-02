@@ -1,2 +1,13 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "snapgrab"
+version = "0.1.0"
+description = "All-in-one social media downloader API"
+readme = "README.md"
+requires-python = ">=3.9"
+
 [tool.vercel]
-entrypoint = "fetch:handler"
+entrypoint = "api/fetch.py"
