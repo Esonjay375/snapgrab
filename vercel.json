@@ -1,6 +1,20 @@
 {
   "functions": {
-    "api/fetch.py": { "maxDuration": 60 },
-    "api/merge.py": { "maxDuration": 60 }
-  }
+    "api/fetch.py": {
+      "maxDuration": 60
+    },
+    "api/merge.py": {
+      "maxDuration": 60
+    }
+  },
+  "routes": [
+    {
+      "src": "/api/fetch",
+      "dest": "/api/fetch.py"
+    },
+    {
+      "src": "/api/merge",
+      "dest": "/api/merge.py"
+    }
+  ]
 }
