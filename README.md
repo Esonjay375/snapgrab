@@ -63,10 +63,10 @@ backlinks. The technical foundation here is solid; the content work is on you.
 
 ## ⚖️ Important legal reality
 
-- Downloading YouTube/Instagram/TikTok content violates their Terms of Service
-  in most cases. Sites in this niche frequently get DMCA'd or domain-blocked.
-- Only download your own content or content you have permission to save.
-- Consider adding a DMCA contact page once you're live.
+The use of this platform and the decision to download any media is at the sole discretion, choice, and risk of the user.
+• Tool-Only Service: This platform strictly provides a technical utility for content downloading. We do not host, store, or monitor any files, nor do we verify the ownership or intended use of the media.
+• Zero Platform Liability: The user bears total responsibility for how they use this service and the content they retrieve. This platform has no affiliation with the owners of the content or the social networks listed, and accepts zero liability for any user actions.
+
 
 ## 📁 Files
 
