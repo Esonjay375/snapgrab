@@ -2,11 +2,10 @@
 import json, urllib.parse, urllib.request
 
 def extract_cobalt(url):
-    # Updated reliable Cobalt API structure
     api_url = "https://api.cobalt.tools/api/json"
     payload = json.dumps({
         "url": url,
-        "videoQuality": "1080"
+        "vQuality": "1080"
     }).encode("utf-8")
     
     req = urllib.request.Request(
@@ -15,7 +14,7 @@ def extract_cobalt(url):
         headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
         },
         method="POST"
     )
@@ -32,8 +31,8 @@ def extract_cobalt(url):
                 
                 if stream_url:
                     return {
-                        "title": data.get("filename") or "Downloaded Media",
-                        "thumbnail": "",
+                        "title": data.get("filename") or "YouTube Video",
+                        "thumbnail": data.get("thumbnail") or "",
                         "formats": [
                             {
                                 "label": "Download Video (MP4)",
