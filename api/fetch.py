@@ -2,27 +2,50 @@
 import json, urllib.parse, urllib.request
 import yt_dlp
 
-def extract_ytdlp(url):
-    ydl_opts = {
-        'format': 'best',
-        'quiet': True,
-        'no_warnings': True,
-        'extract_flat': False,
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        return {
-            "title": info.get("title", "Downloaded Media"),
-            "thumbnail": info.get("thumbnail", ""),
-            "duration": f"{info.get('duration', '')}s",
-            "formats": [
-                {
-                    "label": f"Download ({info.get('ext', 'mp4').upper()})",
-                    "url": info.get("url"),
-                    "audio": False
-                }
-            ]
-        }
+def extract_cobalt(url):
+    # Free high-speed extraction proxy engine that bypasses serverless IP blocks
+    api_url = "https://co.wuk.sh/api/json"
+    payload = json.dumps({
+        "url": url,
+        "vQuality": "1080",
+        "isAudioOnly": False
+    }).encode("utf-8")
+    
+    req = urllib.request.Request(
+        api_url,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        },
+        method="POST"
+    )
+    
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("status") in ["stream", "redirect", "picker"]:
+                # Handle direct stream or picker response
+                stream_url = data.get("url")
+                if not stream_url and "picker" in data and len(data["picker"]) > 0:
+                    stream_url = data["picker"][0].get("url")
+                
+                if stream_url:
+                    return {
+                        "title": data.get("filename") or "Downloaded Video",
+                        "thumbnail": "",
+                        "formats": [
+                            {
+                                "label": "Download Video (MP4)",
+                                "url": stream_url,
+                                "audio": False
+                            }
+                        ]
+                    }
+    except Exception as e:
+        print(f"Cobalt extractor error: {e}")
+    return None
 
 def extract_tikwm(url):
     req_url = f"https://tikwm.com/api/?url={urllib.parse.quote(url)}"
@@ -33,7 +56,6 @@ def extract_tikwm(url):
             return {
                 "title": data.get("title") or "TikTok Video",
                 "thumbnail": data.get("cover") or "",
-                "duration": f"{data.get('duration', '')}s",
                 "formats": [
                     {"label": "HD No Watermark (MP4)", "url": data.get("hdplay") or data.get("play"), "audio": False},
                     {"label": "Audio Only (MP3)", "url": data.get("music"), "audio": True}
@@ -65,17 +87,19 @@ class handler(BaseHTTPRequestHandler):
 
             result = None
             
+            # 1. Route TikTok via TikWM
             if "tiktok.com" in url:
                 try:
                     result = extract_tikwm(url)
                 except Exception:
                     pass
 
+            # 2. Route YouTube and other platforms via proxy extractor
             if not result:
                 try:
-                    result = extract_ytdlp(url)
+                    result = extract_cobalt(url)
                 except Exception as e:
-                    print(f"yt-dlp failed: {e}")
+                    print(f"Proxy extraction failed: {e}")
 
             if result:
                 return self._send(200, result)
