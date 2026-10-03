@@ -2,7 +2,6 @@
 import json, urllib.parse, urllib.request
 
 def extract_cobalt(url):
-    # Try primary Cobalt instance
     endpoints = [
         "https://api.cobalt.tools/api/json",
         "https://co.wuk.sh/api/json"
