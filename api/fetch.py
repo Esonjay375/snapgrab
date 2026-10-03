@@ -1,14 +1,12 @@
 ﻿from http.server import BaseHTTPRequestHandler
 import json, urllib.parse, urllib.request
-import yt_dlp
 
 def extract_cobalt(url):
-    # Free high-speed extraction proxy engine that bypasses serverless IP blocks
-    api_url = "https://co.wuk.sh/api/json"
+    # Updated reliable Cobalt API structure
+    api_url = "https://api.cobalt.tools/api/json"
     payload = json.dumps({
         "url": url,
-        "vQuality": "1080",
-        "isAudioOnly": False
+        "videoQuality": "1080"
     }).encode("utf-8")
     
     req = urllib.request.Request(
@@ -17,7 +15,7 @@ def extract_cobalt(url):
         headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            "User-Agent": "Mozilla/5.0"
         },
         method="POST"
     )
@@ -25,15 +23,16 @@ def extract_cobalt(url):
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            if data.get("status") in ["stream", "redirect", "picker"]:
-                # Handle direct stream or picker response
+            status = data.get("status")
+            
+            if status in ["stream", "redirect", "picker"]:
                 stream_url = data.get("url")
                 if not stream_url and "picker" in data and len(data["picker"]) > 0:
                     stream_url = data["picker"][0].get("url")
                 
                 if stream_url:
                     return {
-                        "title": data.get("filename") or "Downloaded Video",
+                        "title": data.get("filename") or "Downloaded Media",
                         "thumbnail": "",
                         "formats": [
                             {
@@ -44,7 +43,7 @@ def extract_cobalt(url):
                         ]
                     }
     except Exception as e:
-        print(f"Cobalt extractor error: {e}")
+        print(f"Cobalt api error: {e}")
     return None
 
 def extract_tikwm(url):
@@ -87,19 +86,17 @@ class handler(BaseHTTPRequestHandler):
 
             result = None
             
-            # 1. Route TikTok via TikWM
             if "tiktok.com" in url:
                 try:
                     result = extract_tikwm(url)
                 except Exception:
                     pass
 
-            # 2. Route YouTube and other platforms via proxy extractor
             if not result:
                 try:
                     result = extract_cobalt(url)
                 except Exception as e:
-                    print(f"Proxy extraction failed: {e}")
+                    print(f"Extraction failed: {e}")
 
             if result:
                 return self._send(200, result)
