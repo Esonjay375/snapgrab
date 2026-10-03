@@ -5,7 +5,9 @@ def extract_cobalt(url):
     api_url = "https://api.cobalt.tools/api/json"
     payload = json.dumps({
         "url": url,
-        "vQuality": "1080"
+        "videoQuality": "1080",
+        "audioFormat": "mp3",
+        "isAudioOnly": False
     }).encode("utf-8")
     
     req = urllib.request.Request(
@@ -14,13 +16,13 @@ def extract_cobalt(url):
         headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         },
         method="POST"
     )
     
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             status = data.get("status")
             
