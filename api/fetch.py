@@ -5,8 +5,7 @@ def extract_cobalt(url):
     api_url = "https://api.cobalt.tools/api/json"
     payload = json.dumps({
         "url": url,
-        "vQuality": "720",
-        "filenamePattern": "classic"
+        "vQuality": "720"
     }).encode("utf-8")
     
     req = urllib.request.Request(
@@ -15,7 +14,7 @@ def extract_cobalt(url):
         headers={
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Origin": "https://cobalt.tools",
             "Referer": "https://cobalt.tools/"
         },
@@ -23,14 +22,12 @@ def extract_cobalt(url):
     )
     
     try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             status = data.get("status")
             
-            # Handle direct stream, redirect, or multi-item picker
             stream_url = data.get("url")
             if not stream_url and "picker" in data and len(data["picker"]) > 0:
-                # Grab the first available media item from the picker list
                 stream_url = data["picker"][0].get("url")
             
             if status in ["stream", "redirect", "picker"] and stream_url:
