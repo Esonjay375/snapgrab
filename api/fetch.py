@@ -2,48 +2,55 @@
 import json, urllib.parse, urllib.request
 
 def extract_cobalt(url):
-    api_url = "https://api.cobalt.tools/api/json"
+    # Try primary Cobalt instance
+    endpoints = [
+        "https://api.cobalt.tools/api/json",
+        "https://co.wuk.sh/api/json"
+    ]
+    
     payload = json.dumps({
         "url": url,
         "vQuality": "720"
     }).encode("utf-8")
     
-    req = urllib.request.Request(
-        api_url,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Origin": "https://cobalt.tools",
-            "Referer": "https://cobalt.tools/"
-        },
-        method="POST"
-    )
-    
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            status = data.get("status")
+    for api_url in endpoints:
+        try:
+            req = urllib.request.Request(
+                api_url,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Origin": "https://cobalt.tools",
+                    "Referer": "https://cobalt.tools/"
+                },
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                status = data.get("status")
+                
+                stream_url = data.get("url")
+                if not stream_url and "picker" in data and len(data["picker"]) > 0:
+                    stream_url = data["picker"][0].get("url")
+                
+                if status in ["stream", "redirect", "picker"] and stream_url:
+                    return {
+                        "title": data.get("filename") or "YouTube Video",
+                        "thumbnail": data.get("thumbnail") or "",
+                        "formats": [
+                            {
+                                "label": "Download Video (MP4)",
+                                "url": stream_url,
+                                "audio": False
+                            }
+                        ]
+                    }
+        except Exception as e:
+            print(f"Endpoint {api_url} failed: {e}")
+            continue
             
-            stream_url = data.get("url")
-            if not stream_url and "picker" in data and len(data["picker"]) > 0:
-                stream_url = data["picker"][0].get("url")
-            
-            if status in ["stream", "redirect", "picker"] and stream_url:
-                return {
-                    "title": data.get("filename") or "YouTube Video",
-                    "thumbnail": data.get("thumbnail") or "",
-                    "formats": [
-                        {
-                            "label": "Download Video (MP4)",
-                            "url": stream_url,
-                            "audio": False
-                        }
-                    ]
-                }
-    except Exception as e:
-        print(f"Cobalt api error: {e}")
     return None
 
 def extract_tikwm(url):
