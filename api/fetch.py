@@ -21,7 +21,7 @@ def extract_media(url):
         except Exception:
             pass
 
-    # Route YouTube using a guaranteed direct stream bridge
+    # Route YouTube using a reliable public bridge API
     if "youtube.com" in url or "youtu.be" in url:
         video_id = ""
         if "youtu.be/" in url:
@@ -30,20 +30,20 @@ def extract_media(url):
             video_id = url.split("watch?v=")[1].split("&")[0]
             
         if video_id:
-            # Use an active public stream bridge that handles the raw file bytes
-            stream_proxy_url = f"https://invidious.io.lol/latest_version?id={video_id}&itag=22"
+            # Use an active, direct stream extraction endpoint
+            stream_url = f"https://p.oceanserver.net/api/v1/download?url={urllib.parse.quote(url)}"
             return {
                 "title": "YouTube Video",
                 "thumbnail": f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
                 "formats": [
                     {
                         "label": "Download HD Video (MP4)",
-                        "url": stream_proxy_url,
+                        "url": f"https://co.vosh.lol/api/stream?url={urllib.parse.quote(url)}",
                         "audio": False
                     },
                     {
                         "label": "Download Audio (MP3)",
-                        "url": f"https://invidious.io.lol/latest_version?id={video_id}&itag=140",
+                        "url": f"https://co.vosh.lol/api/audio?url={urllib.parse.quote(url)}",
                         "audio": True
                     }
                 ]
