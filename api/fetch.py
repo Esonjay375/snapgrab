@@ -21,26 +21,48 @@ def extract_media(url):
         except Exception:
             pass
 
-    # Route YouTube using a secure player fallback handler
+    # Route YouTube using an active extractor instance
     if "youtube.com" in url or "youtu.be" in url:
-        video_id = ""
-        if "youtu.be/" in url:
-            video_id = url.split("youtu.be/")[1].split("?")[0].split("&")[0]
-        elif "watch?v=" in url:
-            video_id = url.split("watch?v=")[1].split("&")[0]
+        try:
+            api_url = "https://api.cobalt.tools/api/json"
+            payload = json.dumps({
+                "url": url,
+                "vQuality": "720"
+            }).encode("utf-8")
             
-        if video_id:
-            return {
-                "title": "YouTube Video Player",
-                "thumbnail": f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
-                "formats": [
-                    {
-                        "label": "Watch & Save via YouTube Player",
-                        "url": f"https://www.youtube.com/watch?v={video_id}",
-                        "audio": False
+            req = urllib.request.Request(
+                api_url,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Origin": "https://cobalt.tools",
+                    "Referer": "https://cobalt.tools/"
+                },
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                status = data.get("status")
+                stream_url = data.get("url")
+                if not stream_url and "picker" in data and len(data["picker"]) > 0:
+                    stream_url = data["picker"][0].get("url")
+                
+                if status in ["stream", "redirect", "picker"] and stream_url:
+                    return {
+                        "title": data.get("filename") or "YouTube Video",
+                        "thumbnail": data.get("thumbnail") or "",
+                        "formats": [
+                            {
+                                "label": "Download Video (MP4)",
+                                "url": stream_url,
+                                "audio": False
+                            }
+                        ]
                     }
-                ]
-            }
+        except Exception:
+            pass
 
     return None
 
