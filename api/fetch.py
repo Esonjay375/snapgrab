@@ -1,68 +1,76 @@
 ﻿from http.server import BaseHTTPRequestHandler
 import json, urllib.parse, urllib.request
 
-def extract_cobalt(url):
-    api_url = "https://api.cobalt.tools/api/json"
-    payload = json.dumps({
-        "url": url,
-        "videoQuality": "720",
-        "audioFormat": "mp3",
-        "isAudioOnly": False,
-        "downloadMode": "auto"
-    }).encode("utf-8")
-    
-    req = urllib.request.Request(
-        api_url,
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Origin": "https://cobalt.tools",
-            "Referer": "https://cobalt.tools/"
-        },
-        method="POST"
-    )
-    
-    try:
-        with urllib.request.urlopen(req, timeout=12) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            status = data.get("status")
-            
-            stream_url = data.get("url")
-            if not stream_url and "picker" in data and len(data["picker"]) > 0:
-                stream_url = data["picker"][0].get("url")
-            
-            if status in ["stream", "redirect", "picker"] and stream_url:
-                return {
-                    "title": data.get("filename") or "YouTube Video",
-                    "thumbnail": data.get("thumbnail") or "",
-                    "formats": [
-                        {
-                            "label": "Download Video (MP4)",
-                            "url": stream_url,
-                            "audio": False
-                        }
-                    ]
-                }
-    except Exception as e:
-        print(f"Cobalt api error: {e}")
-    return None
+def extract_media(url):
+    # Route TikTok via TikWM
+    if "tiktok.com" in url:
+        try:
+            req_url = f"https://tikwm.com/api/?url={urllib.parse.quote(url)}"
+            req = urllib.request.Request(req_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                data = json.loads(resp.read().decode("utf-8")).get("data", {})
+                if "play" in data:
+                    return {
+                        "title": data.get("title") or "TikTok Video",
+                        "thumbnail": data.get("cover") or "",
+                        "formats": [
+                            {"label": "HD No Watermark (MP4)", "url": data.get("hdplay") or data.get("play"), "audio": False},
+                            {"label": "Audio Only (MP3)", "url": data.get("music"), "audio": True}
+                        ]
+                    }
+        except Exception:
+            pass
 
-def extract_tikwm(url):
-    req_url = f"https://tikwm.com/api/?url={urllib.parse.quote(url)}"
-    req = urllib.request.Request(req_url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=6) as resp:
-        data = json.loads(resp.read().decode("utf-8")).get("data", {})
-        if "play" in data:
-            return {
-                "title": data.get("title") or "TikTok Video",
-                "thumbnail": data.get("cover") or "",
-                "formats": [
-                    {"label": "HD No Watermark (MP4)", "url": data.get("hdplay") or data.get("play"), "audio": False},
-                    {"label": "Audio Only (MP3)", "url": data.get("music"), "audio": True}
-                ]
-            }
+    # Route YouTube & other universal links using active public instances
+    if "youtube.com" in url or "youtu.be" in url:
+        instances = [
+            "https://api.cobalt.tools/api/json",
+            "https://co.vosh.lol/api/json",
+            "https://cobalt.kwi.moe/api/json"
+        ]
+        
+        payload = json.dumps({
+            "url": url,
+            "vQuality": "720"
+        }).encode("utf-8")
+        
+        for api_url in instances:
+            try:
+                req = urllib.request.Request(
+                    api_url,
+                    data=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Origin": "https://cobalt.tools",
+                        "Referer": "https://cobalt.tools/"
+                    },
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    status = data.get("status")
+                    
+                    stream_url = data.get("url")
+                    if not stream_url and "picker" in data and len(data["picker"]) > 0:
+                        stream_url = data["picker"][0].get("url")
+                    
+                    if status in ["stream", "redirect", "picker"] and stream_url:
+                        return {
+                            "title": data.get("filename") or "YouTube Video",
+                            "thumbnail": data.get("thumbnail") or "",
+                            "formats": [
+                                {
+                                    "label": "Download Video (MP4)",
+                                    "url": stream_url,
+                                    "audio": False
+                                }
+                            ]
+                        }
+            except Exception:
+                continue
+
     return None
 
 class handler(BaseHTTPRequestHandler):
@@ -87,20 +95,7 @@ class handler(BaseHTTPRequestHandler):
             if not url:
                 return self._send(400, {"error": "Missing URL parameter."})
 
-            result = None
-            
-            if "tiktok.com" in url:
-                try:
-                    result = extract_tikwm(url)
-                except Exception:
-                    pass
-
-            if not result:
-                try:
-                    result = extract_cobalt(url)
-                except Exception as e:
-                    print(f"Extraction failed: {e}")
-
+            result = extract_media(url)
             if result:
                 return self._send(200, result)
 
