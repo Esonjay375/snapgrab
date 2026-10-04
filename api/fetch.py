@@ -21,19 +21,21 @@ def extract_media(url):
         except Exception:
             pass
 
-    # Route YouTube using active and reliable endpoints
+    # Route YouTube using a resilient multi-gateway fallback list
     if "youtube.com" in url or "youtu.be" in url:
-        instances = [
-            "https://api.cobalt.tools/api/json",
-            "https://co.vosh.lol/api/json"
+        gateways = [
+            ("https://api.cobalt.tools/api/json", "https://cobalt.tools/"),
+            ("https://co.vosh.lol/api/json", "https://vosh.lol/"),
+            ("https://cobalt.kwi.moe/api/json", "https://kwi.moe/")
         ]
         
         payload = json.dumps({
             "url": url,
-            "vQuality": "720"
+            "vQuality": "720",
+            "isAudioOnly": False
         }).encode("utf-8")
         
-        for api_url in instances:
+        for api_url, origin in gateways:
             try:
                 req = urllib.request.Request(
                     api_url,
@@ -41,9 +43,9 @@ def extract_media(url):
                     headers={
                         "Content-Type": "application/json",
                         "Accept": "application/json",
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                        "Origin": "https://cobalt.tools",
-                        "Referer": "https://cobalt.tools/"
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                        "Origin": origin,
+                        "Referer": origin
                     },
                     method="POST"
                 )
