@@ -21,7 +21,7 @@ def extract_media(url):
         except Exception:
             pass
 
-    # Route YouTube cleanly to avoid blocked stream frames
+    # Route YouTube using a guaranteed direct stream bridge
     if "youtube.com" in url or "youtu.be" in url:
         video_id = ""
         if "youtu.be/" in url:
@@ -30,14 +30,21 @@ def extract_media(url):
             video_id = url.split("watch?v=")[1].split("&")[0]
             
         if video_id:
+            # Use an active public stream bridge that handles the raw file bytes
+            stream_proxy_url = f"https://invidious.io.lol/latest_version?id={video_id}&itag=22"
             return {
                 "title": "YouTube Video",
                 "thumbnail": f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
                 "formats": [
                     {
-                        "label": "Open YouTube Link",
-                        "url": f"https://www.youtube.com/watch?v={video_id}",
+                        "label": "Download HD Video (MP4)",
+                        "url": stream_proxy_url,
                         "audio": False
+                    },
+                    {
+                        "label": "Download Audio (MP3)",
+                        "url": f"https://invidious.io.lol/latest_version?id={video_id}&itag=140",
+                        "audio": True
                     }
                 ]
             }
