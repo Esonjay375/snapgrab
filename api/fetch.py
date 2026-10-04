@@ -1,114 +1,101 @@
 ﻿from http.server import BaseHTTPRequestHandler
 import json, urllib.parse, urllib.request
 
-UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+try:
+    import yt_dlp
+except ImportError:
+    yt_dlp = None
 
-# Backup instances (verified alive Oct 2026) — used only if the live list is unreachable
-BACKUP_INSTANCES = [
-    "https://invidious.f5.si",
-    "https://invidious.nerdvpn.de",
-    "https://inv.nadeko.net",
-    "https://yt.chocolatemoo53.com",
-    "https://invidious.tiekoetter.com",
-]
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-def get_working_instances():
-    """Fetch the public Invidious instance list; return healthy ones, API-enabled first."""
+def extract_tiktok(url):
     try:
-        req = urllib.request.Request("https://api.invidious.io/instances.json", headers=UA)
+        req_url = f"https://tikwm.com/api/?url={urllib.parse.quote(url)}"
+        req = urllib.request.Request(req_url, headers=UA)
         with urllib.request.urlopen(req, timeout=6) as resp:
-            raw = json.loads(resp.read().decode("utf-8"))
-        api_ok, plain = [], []
-        for host, meta in raw:
-            if meta.get("type") != "https":
-                continue
-            mon = meta.get("monitor") or {}
-            if not mon or mon.get("down"):
-                continue
-            base = meta.get("uri") or f"https://{host}"
-            (api_ok if meta.get("api") else plain).append(base)
-        return api_ok + plain or BACKUP_INSTANCES
+            data = json.loads(resp.read().decode("utf-8")).get("data", {})
+            if "play" in data:
+                return {
+                    "title": data.get("title") or "TikTok Video",
+                    "thumbnail": data.get("cover") or "",
+                    "formats": [
+                        {"label": "HD No Watermark (MP4)", "url": data.get("hdplay") or data.get("play"), "audio": False},
+                        {"label": "Audio Only (MP3)", "url": data.get("music"), "audio": True}
+                    ]
+                }
     except Exception:
-        return BACKUP_INSTANCES
-
-def extract_youtube(video_id):
-    """Try each healthy Invidious instance until one returns real stream URLs."""
-    for base in get_working_instances():
-        try:
-            api = (f"{base}/api/v1/videos/{video_id}"
-                   f"?fields=title,videoThumbnails,formatStreams,adaptiveFormats")
-            req = urllib.request.Request(api, headers=UA)
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-
-            title = data.get("title") or "YouTube Video"
-
-            thumb = ""
-            for t in data.get("videoThumbnails", []):
-                if t.get("quality") == "medium":
-                    thumb = t.get("url") or ""
-
-            # Best combined video+audio MP4 stream
-            video_fmt = None
-            for s in data.get("formatStreams", []):
-                if s.get("type", "").startswith("video/mp4") and s.get("url"):
-                    video_fmt = s
-                    break
-            if not video_fmt and data.get("formatStreams"):
-                video_fmt = data["formatStreams"][0]
-
-            # Best audio-only stream (usually itag 140 = m4a)
-            audio_fmt = None
-            for a in data.get("adaptiveFormats", []):
-                if a.get("type", "").startswith("audio/mp4") and a.get("url"):
-                    audio_fmt = a
-                    break
-
-            formats = []
-            if video_fmt:
-                res = video_fmt.get("resolution") or "MP4"
-                formats.append({"label": f"Download Video ({res})",
-                                "url": video_fmt["url"], "audio": False})
-            else:
-                formats.append({"label": "Download Video (MP4)",
-                                "url": f"{base}/latest_version?id={video_id}&itag=22",
-                                "audio": False})
-            if audio_fmt:
-                formats.append({"label": "Download Audio (MP3)",
-                                "url": audio_fmt["url"], "audio": True})
-            else:
-                formats.append({"label": "Download Audio (MP3)",
-                                "url": f"{base}/latest_version?id={video_id}&itag=140",
-                                "audio": True})
-
-            return {"title": title,
-                    "thumbnail": thumb or f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
-                    "formats": formats}
-        except Exception:
-            continue  # instance dead or rate-limited — try the next one
+        pass
     return None
 
-def extract_media(url):
-    # Route TikTok via TikWM
-    if "tiktok.com" in url:
-        try:
-            req_url = f"https://tikwm.com/api/?url={urllib.parse.quote(url)}"
-            req = urllib.request.Request(req_url, headers=UA)
-            with urllib.request.urlopen(req, timeout=6) as resp:
-                data = json.loads(resp.read().decode("utf-8")).get("data", {})
-                if "play" in data:
-                    return {
-                        "title": data.get("title") or "TikTok Video",
-                        "thumbnail": data.get("cover") or "",
-                        "formats": [
-                            {"label": "HD No Watermark (MP4)", "url": data.get("hdplay") or data.get("play"), "audio": False},
-                            {"label": "Audio Only (MP3)", "url": data.get("music"), "audio": True}
-                        ]
-                    }
-        except Exception:
-            pass
+def pick_best(fmt_list, key, reverse=True):
+    return max(fmt_list, key=key) if fmt_list else None
 
-    # Route YouTube — fixed: multi-instance with real API data
+def extract_youtube(video_id):
+    if yt_dlp is None:
+        raise RuntimeError("yt-dlp not installed — add it to requirements.txt")
+
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "skip_download": True,
+        "socket_timeout": 15,
+        "extractor_retries": 2,
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    fmts = info.get("formats") or []
+
+    # Combined video+audio in one file (progressive) — these always play with sound
+    progressive = [f for f in fmts
+                   if f.get("vcodec") not in (None, "none")
+                   and f.get("acodec") not in (None, "none")
+                   and f.get("ext") == "mp4"
+                   and f.get("url")]
+    best_prog = pick_best(progressive, lambda f: f.get("height") or 0)
+
+    # Audio-only streams
+    audio_only = [f for f in fmts
+                  if f.get("vcodec") in (None, "none")
+                  and f.get("acodec") not in (None, "none")
+                  and f.get("url")]
+    # Prefer m4a (universal), then anything else by bitrate
+    audio_only.sort(key=lambda f: ((f.get("ext") == "m4a"), f.get("abr") or 0), reverse=True)
+    best_audio = audio_only[0] if audio_only else None
+
+    formats = []
+    if best_prog:
+        res = best_prog.get("height")
+        formats.append({
+            "label": f"Download Video ({res}p MP4)" if res else "Download Video (MP4)",
+            "url": best_prog["url"],
+            "audio": False
+        })
+    if best_audio:
+        ext = (best_audio.get("ext") or "m4a").upper()
+        formats.append({
+            "label": f"Download Audio ({ext})",
+            "url": best_audio["url"],
+            "audio": True
+        })
+
+    if not formats:
+        raise RuntimeError("No downloadable streams found — video may be age-restricted or members-only")
+
+    return {
+        "title": info.get("title") or "YouTube Video",
+        "thumbnail": info.get("thumbnail") or f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
+        "formats": formats
+    }
+
+def extract_media(url):
+    if "tiktok.com" in url:
+        r = extract_tiktok(url)
+        if r:
+            return r
+
     if "youtube.com" in url or "youtu.be" in url:
         video_id = ""
         if "youtu.be/" in url:
@@ -117,11 +104,11 @@ def extract_media(url):
             video_id = url.split("watch?v=")[1].split("&")[0]
         elif "/shorts/" in url:
             video_id = url.split("/shorts/")[1].split("?")[0].split("&")[0]
+        elif "/live/" in url:
+            video_id = url.split("/live/")[1].split("?")[0].split("&")[0]
 
         if video_id:
-            result = extract_youtube(video_id)
-            if result:
-                return result
+            return extract_youtube(video_id)  # raises with a real error message on failure
 
     return None
 
@@ -142,7 +129,14 @@ class handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            parsed = urllib.parse.urlparse(self.path)
+
+            # Optional proxy endpoint: /download?u=<urlencoded-stream-url>
+            # Use this if a direct googlevideo link fails in the browser (IP binding)
+            if parsed.path == "/download":
+                return self._proxy_download(parsed)
+
+            qs = urllib.parse.parse_qs(parsed.query)
             url = (qs.get("url") or [""])[0].strip()
             if not url:
                 return self._send(400, {"error": "Missing URL parameter."})
@@ -154,4 +148,31 @@ class handler(BaseHTTPRequestHandler):
             return self._send(500, {"error": "Failed to extract media. Link may be private or unsupported."})
 
         except Exception as e:
-            self._send(500, {"error": str(e)[:200]})
+            self._send(500, {"error": str(e)[:300]})
+
+    def _proxy_download(self, parsed):
+        qs = urllib.parse.parse_qs(parsed.query)
+        target = (qs.get("u") or [""])[0]
+        if not target.startswith("http"):
+            return self._send(400, {"error": "Bad download URL"})
+        try:
+            req = urllib.request.Request(target, headers=UA)
+            upstream = urllib.request.urlopen(req, timeout=30)
+            self.send_response(200)
+            self.send_header("Content-Type",
+                upstream.headers.get("Content-Type", "application/octet-stream"))
+            cd = upstream.headers.get("Content-Disposition")
+            if cd:
+                self.send_header("Content-Disposition", cd)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            while True:
+                chunk = upstream.read(64 * 1024)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+        except Exception as e:
+            try:
+                self._send(500, {"error": str(e)[:200]})
+            except Exception:
+                pass
