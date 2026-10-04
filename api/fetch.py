@@ -21,7 +21,7 @@ def extract_media(url):
         except Exception:
             pass
 
-    # Route YouTube using a reliable direct embed/stream format
+    # Route YouTube cleanly to avoid blocked stream frames
     if "youtube.com" in url or "youtu.be" in url:
         video_id = ""
         if "youtu.be/" in url:
@@ -31,12 +31,12 @@ def extract_media(url):
             
         if video_id:
             return {
-                "title": "YouTube Video Stream",
+                "title": "YouTube Video",
                 "thumbnail": f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg",
                 "formats": [
                     {
-                        "label": "Play & Download Stream",
-                        "url": f"https://www.youtube.com/embed/{video_id}?autoplay=1",
+                        "label": "Open YouTube Link",
+                        "url": f"https://www.youtube.com/watch?v={video_id}",
                         "audio": False
                     }
                 ]
